@@ -170,6 +170,11 @@ jobs:
         shell: bash
         run: sudo chown $USER -R ./
 
+      - name: Apply patch for arm64
+        if: inputs.os == 'ubuntu-22.04-arm' || inputs.os == 'ubuntu-24.04-arm'
+        shell: bash
+        run: git apply arm64.patch
+
       - name: Build slicer
         if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-22.04-arm' || inputs.os == 'ubuntu-24.04-arm'
         shell: bash
