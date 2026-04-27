@@ -138,14 +138,14 @@ jobs:
 
 
       - name: Build on Ubuntu ${{ inputs.arch }}
-        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-22.04-arm' || inputs.os == 'ubuntu-24.04-arm' ||
+        if: inputs.os == 'ubuntu-22.04' || inputs.os == 'ubuntu-24.04' || inputs.os == 'ubuntu-22.04-arm' || inputs.os == 'ubuntu-24.04-arm'
         working-directory: ${{ github.workspace }}
         run: |
             sudo ./BuildLinux.sh -ur
             sudo chown $USER -R ./
             ./BuildLinux.sh -dfr
             cd deps/build
-            tar -czvf BambuStudio_dep_${{ inputs.os }}_${{ inputs.arch }}_$(date +"%Y%m%d").tar.gz destdir
+            tar -czvf BambuStudio_dep_${{ inputs.os }}_$(date +"%Y%m%d").tar.gz destdir
 
       # Upload Artifacts
       - name: Upload Mac ${{ inputs.arch }} artifacts
@@ -172,7 +172,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: BambuStudio_dep_${{ inputs.os }}_${{ inputs.arch }}_${{ env.date }}
-          path: ${{ github.workspace }}/deps/build/BambuStudio_dep_${{ inputs.os }}_${{ inputs.arch }}_*.tar.gz
+          path: ${{ github.workspace }}/deps/build/BambuStudio_dep_${{ inputs.os }}_*.tar.gz
 
   build_Bambu:
     name: Build BambuStudio
