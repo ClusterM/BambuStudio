@@ -44,7 +44,13 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
+            arch: x86_64
           - os: ubuntu-24.04
+            arch: x86_64
+          - os: ubuntu-22.04-arm
+            arch: arm64
+          - os: ubuntu-24.04-arm
+            arch: arm64
           - os: windows-latest
           - os: macos-15-intel
             arch: x86_64
