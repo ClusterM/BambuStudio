@@ -559,6 +559,8 @@ bool BackgroundSlicingProcess::stop()
 	BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< ", enter"<<std::endl;
 	// m_print->state_mutex() shall NOT be held. Unfortunately there is no interface to test for it.
 	std::unique_lock<std::mutex> lck(m_mutex);
+	// Always clear the one-shot post-process skip flag regardless of the return path.
+	struct SkipFlagGuard { bool& f; ~SkipFlagGuard() { f = false; } } skip_flag_guard{ m_skip_post_process_once };
 	if (m_state == STATE_INITIAL) {
 //		m_export_path.clear();
 		return false;
@@ -815,9 +817,26 @@ bool BackgroundSlicingProcess::invalidate_all_steps()
 	return m_step_state.invalidate_all([this](){ this->stop_internal(); });
 }
 
+void BackgroundSlicingProcess::set_skip_post_process_once(bool skip)
+{
+    std::unique_lock<std::mutex> lck(m_mutex);
+    m_skip_post_process_once = skip;
+}
+
 //Call post-processing script for the last step during slicing
 void BackgroundSlicingProcess::finalize_gcode()
 {
+    bool skip = false;
+    {
+        std::unique_lock<std::mutex> lck(m_mutex);
+        skip = m_skip_post_process_once;
+        m_skip_post_process_once = false;
+    }
+    if (skip) {
+        m_print->set_status(100, _utf8(L("Slicing complete")));
+        return;
+    }
+
     m_print->set_status(95, _utf8(L("Running post-processing scripts")));
 
     run_post_process_scripts(m_temp_output_path, false, "File", m_temp_output_path, m_fff_print->full_print_config());
@@ -828,6 +847,12 @@ void BackgroundSlicingProcess::finalize_gcode()
     if (post_process && !post_process->values.empty() && m_gcode_result) {
         m_print->set_status(97, _utf8(L("Updating preview with post-processed G-code")));
         GCodeProcessor processor;
+        // Apply the plate origin offset so move coordinates in the result are
+        // relative to the correct plate, not always plate 0.  Without this,
+        // slicing any plate other than the first one shifts the preview geometry
+        // by the plate's XY origin, causing the model to appear outside the bed.
+        const Vec3d origin = m_fff_print->get_plate_origin();
+        processor.set_xy_offset(origin(0), origin(1));
         processor.process_file(m_temp_output_path);
         *m_gcode_result = std::move(processor.extract_result());
     }
