@@ -1982,17 +1982,28 @@ int GUI_App::updating_bambu_networking()
 bool GUI_App::check_networking_version()
 {
     std::string network_ver = Slic3r::NetworkAgent::get_version();
-    if (!network_ver.empty()) {
-        BOOST_LOG_TRIVIAL(info) << "get_network_agent_version=" << network_ver;
-    }
-    std::string studio_ver = SLIC3R_VERSION;
-    if (network_ver.length() >= 8) {
-        if (network_ver.substr(0,8) == studio_ver.substr(0,8)) {
-            m_networking_compatible = true;
-            return true;
-        }
+    std::string studio_ver  = SLIC3R_VERSION;
+
+    BOOST_LOG_TRIVIAL(info) << "check_networking_version: plugin_ver='" << network_ver
+                            << "' studio_ver='" << studio_ver << "'";
+
+    if (network_ver.length() < 8) {
+        BOOST_LOG_TRIVIAL(warning) << "check_networking_version: plugin version string is too short ("
+                                   << network_ver.length() << " chars), expected >= 8 - treating as incompatible";
+        m_networking_compatible = false;
+        return false;
     }
 
+    std::string net_prefix    = network_ver.substr(0, 8);
+    std::string studio_prefix = studio_ver.substr(0, 8);
+    if (net_prefix == studio_prefix) {
+        BOOST_LOG_TRIVIAL(info) << "check_networking_version: version prefix matches ('" << net_prefix << "') - compatible";
+        m_networking_compatible = true;
+        return true;
+    }
+
+    BOOST_LOG_TRIVIAL(warning) << "check_networking_version: version prefix mismatch: plugin='"
+                               << net_prefix << "' studio='" << studio_prefix << "' - incompatible";
     m_networking_compatible = false;
     return false;
 }
@@ -3421,41 +3432,56 @@ void GUI_App::copy_network_if_available()
 
 bool GUI_App::on_init_network(bool try_backup)
 {
-    int  load_agent_dll       = Slic3r::NetworkAgent::initialize_network_module(false, !app_config->get_bool("ignore_module_cert"));
+    bool ignore_cert      = app_config->get_bool("ignore_module_cert");
+    bool installed_plugin = app_config->get("installed_networking") == "1";
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__
+        << ": try_backup=" << try_backup
+        << " ignore_module_cert=" << ignore_cert
+        << " installed_networking=" << installed_plugin;
+
+    int  load_agent_dll       = Slic3r::NetworkAgent::initialize_network_module(false, !ignore_cert);
     bool create_network_agent = false;
 __retry:
     if (!load_agent_dll) {
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, load dll ok";
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": library loaded successfully";
         if (check_networking_version()) {
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, compatibility version";
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": version check passed, loading BambuSource entry";
             auto bambu_source = Slic3r::NetworkAgent::get_bambu_source_entry();
             if (!bambu_source) {
-                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": can not get bambu source module!";
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": get_bambu_source_entry() returned null"
+                    " - BambuSource module missing or export not found";
                 m_networking_compatible = false;
-                if (app_config->get("installed_networking") == "1") {
+                if (installed_plugin) {
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": marking plugin as needing update (source entry missing)";
                     m_networking_need_update = true;
                 }
             }
-            else
+            else {
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": BambuSource entry ok, network agent will be created";
                 create_network_agent = true;
+            }
         } else {
             if (try_backup) {
                 int result = Slic3r::NetworkAgent::unload_network_module();
-                BOOST_LOG_TRIVIAL(info) << "on_init_network, version mismatch, unload_network_module, result = " << result;
-                load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(true, !app_config->get_bool("ignore_module_cert"));
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": version mismatch in primary plugin,"
+                    " unloaded (result=" << result << "), retrying with backup copy";
+                load_agent_dll = Slic3r::NetworkAgent::initialize_network_module(true, !ignore_cert);
                 try_backup = false;
                 goto __retry;
             }
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, version dismatch, need upload network module";
-            if (app_config->get("installed_networking") == "1") {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": version mismatch in both primary and backup plugin,"
+                " plugin update required";
+            if (installed_plugin) {
                 m_networking_need_update = true;
             }
         }
     } else {
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, load dll failed";
-        if (app_config->get("installed_networking") == "1") {
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": on_init_network, need upload network module";
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": initialize_network_module() failed (returned " << load_agent_dll << ")";
+        if (installed_plugin) {
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": installed_networking=1, marking plugin as needing update";
             m_networking_need_update = true;
+        } else {
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": installed_networking=0, no update will be prompted";
         }
     }
 

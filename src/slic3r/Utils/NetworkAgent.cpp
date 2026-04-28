@@ -176,6 +176,19 @@ std::string NetworkAgent::get_libpath_in_current_directory(std::string library_n
 }
 
 
+// Returns a human-readable reason why IsSamePublisher passed or failed.
+static std::string publisher_match_reason(const SignerSummary& a, const SignerSummary& b)
+{
+    if (!a.team_id.empty() && a.team_id == b.team_id)
+        return "team_id match: " + a.team_id;
+    if (a.spki_sha256 == b.spki_sha256)
+        return "spki_sha256 match";
+    if (a.cert_sha256 == b.cert_sha256)
+        return "cert_sha256 match";
+    return "no match (team_id='" + a.team_id + "'/'" + b.team_id + "', spki differs, cert differs)"
+           + " self:" + a.as_print() + " module:" + b.as_print();
+}
+
 int NetworkAgent::initialize_network_module(bool using_backup, bool validate_cert)
 {
     //int ret = -1;
@@ -184,58 +197,85 @@ int NetworkAgent::initialize_network_module(bool using_backup, bool validate_cer
     boost::filesystem::path data_dir_path(data_dir_str);
     auto plugin_folder = data_dir_path / "plugins";
 
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__
+        << boost::format(": using_backup=%1%, validate_cert=%2%, data_dir=%3%")
+           % using_backup % validate_cert % data_dir_str;
+
     if (using_backup) {
         plugin_folder = plugin_folder/"backup";
     }
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": plugin_folder=" << plugin_folder.string();
+
     std::optional<SignerSummary> self_cert_summary, module_cert_summary;
-    if (validate_cert)
+    if (validate_cert) {
         self_cert_summary = SummarizeSelf();
-    else
-        BOOST_LOG_TRIVIAL(info) << "wouldn't validate networking dll cert";
-    if (!self_cert_summary)
-        BOOST_LOG_TRIVIAL(info) << "self cert not exist";
+        if (self_cert_summary)
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": self cert ok -" << self_cert_summary->as_print();
+        else
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": self cert not found - cert validation will be skipped";
+    } else {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cert validation disabled (ignore_module_cert=1)";
+    }
 
     //first load the library
 #if defined(_MSC_VER) || defined(_WIN32)
     library = plugin_folder.string() + "\\" + std::string(BAMBU_NETWORK_LIBRARY) + ".dll";
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": trying to load library: " << library;
     wchar_t lib_wstr[128];
     memset(lib_wstr, 0, sizeof(lib_wstr));
     ::MultiByteToWideChar(CP_UTF8, NULL, library.c_str(), strlen(library.c_str())+1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
     if (self_cert_summary) {
         module_cert_summary = SummarizeModule(library);
         if (module_cert_summary) {
-            if (IsSamePublisher(*self_cert_summary, *module_cert_summary))
+            std::string reason = publisher_match_reason(*self_cert_summary, *module_cert_summary);
+            if (IsSamePublisher(*self_cert_summary, *module_cert_summary)) {
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cert check passed - " << reason;
                 networking_module = LoadLibrary(lib_wstr);
-            else
-                BOOST_LOG_TRIVIAL(info) << "module is from another publisher:" << module_cert_summary->as_print();
+                if (!networking_module)
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+            } else {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cert check failed - " << reason;
+            }
         }
         else
-            BOOST_LOG_TRIVIAL(info) << "module_cert is null";
-    } else
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": module cert not found in: " << library;
+    } else {
         networking_module = LoadLibrary(lib_wstr);
+        if (!networking_module)
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+    }
     if (!networking_module) {
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", try load library directly from current directory");
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": plugin dir load failed, trying current exe directory";
 
         std::string library_path = get_libpath_in_current_directory(std::string(BAMBU_NETWORK_LIBRARY));
         if (library_path.empty()) {
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", can not get path in current directory for %1%") % BAMBU_NETWORK_LIBRARY;
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cannot resolve exe-directory path for " << BAMBU_NETWORK_LIBRARY;
             return -1;
         }
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": trying to load library: " << library_path;
         memset(lib_wstr, 0, sizeof(lib_wstr));
         ::MultiByteToWideChar(CP_UTF8, NULL, library_path.c_str(), strlen(library_path.c_str())+1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
         if (self_cert_summary) {
             module_cert_summary = SummarizeModule(library_path);
             if (module_cert_summary) {
-                if (IsSamePublisher(*self_cert_summary, *module_cert_summary))
+                std::string reason = publisher_match_reason(*self_cert_summary, *module_cert_summary);
+                if (IsSamePublisher(*self_cert_summary, *module_cert_summary)) {
+                    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cert check passed - " << reason;
                     networking_module = LoadLibrary(lib_wstr);
-                else
-                    BOOST_LOG_TRIVIAL(info) << "module is from another publisher:" << module_cert_summary->as_print();
+                    if (!networking_module)
+                        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+                } else {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cert check failed - " << reason;
+                }
             }
             else
-                BOOST_LOG_TRIVIAL(info) << "module_cert is null";
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": module cert not found in: " << library_path;
         }
-        else
+        else {
             networking_module = LoadLibrary(lib_wstr);
+            if (!networking_module)
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+        }
     }
 #else
     #if defined(__WXMAC__)
@@ -243,34 +283,39 @@ int NetworkAgent::initialize_network_module(bool using_backup, bool validate_cer
     #else
     library = plugin_folder.string() + "/" + std::string("lib") + std::string(BAMBU_NETWORK_LIBRARY) + ".so";
     #endif
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", line %1%, loading network module, using_backup %2%\n")%__LINE__ %using_backup;
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": trying to load library: " << library;
     module_cert_summary = SummarizeModule(library);
     if (self_cert_summary) {
-        module_cert_summary = SummarizeModule(library);
         if (module_cert_summary) {
-            if (IsSamePublisher(*self_cert_summary, *module_cert_summary))
+            std::string reason = publisher_match_reason(*self_cert_summary, *module_cert_summary);
+            if (IsSamePublisher(*self_cert_summary, *module_cert_summary)) {
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cert check passed - " << reason;
                 networking_module = dlopen(library.c_str(), RTLD_LAZY);
-            else
-                BOOST_LOG_TRIVIAL(info) << "module is from another publisher:" << module_cert_summary->as_print();
+            } else {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cert check failed - " << reason;
+            }
         }
         else
-            BOOST_LOG_TRIVIAL(info) << "module_cert is null";
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": module cert not found in: " << library;
     }
     else
-        networking_module = dlopen( library.c_str(), RTLD_LAZY);
+        networking_module = dlopen(library.c_str(), RTLD_LAZY);
     if (!networking_module) {
         char* dll_error = dlerror();
-        std::string err       = dll_error ? std::string(dll_error) : std::string("(null)");
-        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(", error, dlerror is %1%") % err;
+        std::string err = dll_error ? std::string(dll_error) : std::string("(null)");
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": dlopen failed: " << err;
+    } else {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": dlopen succeeded, handle=" << networking_module;
     }
-    BOOST_LOG_TRIVIAL(info) << boost::format("after dlopen, network_module is %1%") % networking_module;
 #endif
 
     if (!networking_module) {
-        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << boost::format(", line %1%, can not Load Library, using_backup %2%\n")%__LINE__ %using_backup;
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__
+            << boost::format(": FAILED to load library, using_backup=%1%") % using_backup;
         return -1;
     }
-    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", line %1%,  successfully loaded library, using_backup %2%, module %3%")%__LINE__ %using_backup %networking_module;
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__
+        << boost::format(": library loaded successfully, using_backup=%1%, handle=%2%") % using_backup % networking_module;
 
     // load file transfer interface
     InitFTModule(networking_module);
