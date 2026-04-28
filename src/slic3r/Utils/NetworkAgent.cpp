@@ -7,6 +7,7 @@
 #endif
 
 #include <boost/log/trivial.hpp>
+#include <boost/filesystem.hpp>
 #include "libslic3r/Utils.hpp"
 #include "slic3r/Utils/BBLUtil.hpp"
 #include "NetworkAgent.hpp"
@@ -17,6 +18,37 @@
 using namespace BBL;
 
 namespace Slic3r {
+
+#if defined(_MSC_VER) || defined(_WIN32)
+static std::string win32_error_string(DWORD code)
+{
+    char* msg = nullptr;
+    DWORD len = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<char*>(&msg), 0, nullptr);
+    if (len && msg) {
+        std::string result(msg, len);
+        LocalFree(msg);
+        // strip trailing \r\n
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+            result.pop_back();
+        return result + " (code " + std::to_string(code) + ")";
+    }
+    return "unknown error (code " + std::to_string(code) + ")";
+}
+#endif
+
+// Checks whether a path exists on disk and returns a descriptive string for logging.
+static std::string file_existence_note(const std::string& path)
+{
+    boost::system::error_code ec;
+    if (boost::filesystem::exists(path, ec))
+        return "file exists but has no valid signature";
+    if (ec)
+        return "file existence check failed: " + ec.message();
+    return "file does not exist on disk";
+}
 
 #define BAMBU_SOURCE_LIBRARY "BambuSource"
 
@@ -231,18 +263,23 @@ int NetworkAgent::initialize_network_module(bool using_backup, bool validate_cer
             if (IsSamePublisher(*self_cert_summary, *module_cert_summary)) {
                 BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cert check passed - " << reason;
                 networking_module = LoadLibrary(lib_wstr);
-                if (!networking_module)
-                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+                if (!networking_module) {
+                    DWORD err = GetLastError();
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed: " << win32_error_string(err);
+                }
             } else {
                 BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cert check failed - " << reason;
             }
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cannot read certificate from '" << library
+                << "': " << file_existence_note(library);
         }
-        else
-            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": module cert not found in: " << library;
     } else {
         networking_module = LoadLibrary(lib_wstr);
-        if (!networking_module)
-            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+        if (!networking_module) {
+            DWORD err = GetLastError();
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed: " << win32_error_string(err);
+        }
     }
     if (!networking_module) {
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": plugin dir load failed, trying current exe directory";
@@ -262,19 +299,23 @@ int NetworkAgent::initialize_network_module(bool using_backup, bool validate_cer
                 if (IsSamePublisher(*self_cert_summary, *module_cert_summary)) {
                     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": cert check passed - " << reason;
                     networking_module = LoadLibrary(lib_wstr);
-                    if (!networking_module)
-                        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+                    if (!networking_module) {
+                        DWORD err = GetLastError();
+                        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed: " << win32_error_string(err);
+                    }
                 } else {
                     BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cert check failed - " << reason;
                 }
+            } else {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cannot read certificate from '" << library_path
+                    << "': " << file_existence_note(library_path);
             }
-            else
-                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": module cert not found in: " << library_path;
-        }
-        else {
+        } else {
             networking_module = LoadLibrary(lib_wstr);
-            if (!networking_module)
-                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed, GetLastError=" << GetLastError();
+            if (!networking_module) {
+                DWORD err = GetLastError();
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed: " << win32_error_string(err);
+            }
         }
     }
 #else
@@ -294,12 +335,13 @@ int NetworkAgent::initialize_network_module(bool using_backup, bool validate_cer
             } else {
                 BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cert check failed - " << reason;
             }
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cannot read certificate from '" << library
+                << "': " << file_existence_note(library);
         }
-        else
-            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": module cert not found in: " << library;
-    }
-    else
+    } else {
         networking_module = dlopen(library.c_str(), RTLD_LAZY);
+    }
     if (!networking_module) {
         char* dll_error = dlerror();
         std::string err = dll_error ? std::string(dll_error) : std::string("(null)");
