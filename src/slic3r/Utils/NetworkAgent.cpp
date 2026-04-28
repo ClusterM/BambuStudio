@@ -600,33 +600,49 @@ HMODULE NetworkAgent::get_bambu_source_entry()
 void* NetworkAgent::get_bambu_source_entry()
 #endif
 {
-    if ((source_module) || (!networking_module))
+    if (source_module) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": BambuSource already loaded, handle=" << source_module;
         return source_module;
+    }
+    if (!networking_module) {
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": skipping BambuSource load - networking_module is null";
+        return nullptr;
+    }
 
-    //int ret = -1;
     std::string library;
     std::string data_dir_str = data_dir();
     boost::filesystem::path data_dir_path(data_dir_str);
     auto plugin_folder = data_dir_path / "plugins";
+
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": loading BambuSource from plugin_folder=" << plugin_folder.string();
+
 #if defined(_MSC_VER) || defined(_WIN32)
     wchar_t lib_wstr[128];
 
-    //goto load bambu source
     library = plugin_folder.string() + "/" + std::string(BAMBU_SOURCE_LIBRARY) + ".dll";
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": trying: " << library;
     memset(lib_wstr, 0, sizeof(lib_wstr));
     ::MultiByteToWideChar(CP_UTF8, NULL, library.c_str(), strlen(library.c_str())+1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
     source_module = LoadLibrary(lib_wstr);
     if (!source_module) {
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", try load BambuSource directly from current directory");
+        DWORD err = GetLastError();
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary failed: " << win32_error_string(err);
+
         std::string library_path = get_libpath_in_current_directory(std::string(BAMBU_SOURCE_LIBRARY));
         if (library_path.empty()) {
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", can not get path in current directory for %1%") % BAMBU_SOURCE_LIBRARY;
-            return source_module;
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": cannot resolve exe-directory path for " << BAMBU_SOURCE_LIBRARY
+                << " - BambuSource not available";
+            return nullptr;
         }
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", line %1%")%__LINE__;
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": trying exe-directory fallback: " << library_path;
         memset(lib_wstr, 0, sizeof(lib_wstr));
         ::MultiByteToWideChar(CP_UTF8, NULL, library_path.c_str(), strlen(library_path.c_str()) + 1, lib_wstr, sizeof(lib_wstr) / sizeof(lib_wstr[0]));
         source_module = LoadLibrary(lib_wstr);
+        if (!source_module) {
+            err = GetLastError();
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": LoadLibrary fallback failed: " << win32_error_string(err)
+                << " - BambuSource not available";
+        }
     }
 #else
 #if defined(__WXMAC__)
@@ -634,16 +650,19 @@ void* NetworkAgent::get_bambu_source_entry()
 #else
     library = plugin_folder.string() + "/" + std::string("lib") + std::string(BAMBU_SOURCE_LIBRARY) + ".so";
 #endif
-    source_module = dlopen( library.c_str(), RTLD_LAZY);
-    /*if (!source_module) {
-#if defined(__WXMAC__)
-        library = std::string("lib") + BAMBU_SOURCE_LIBRARY + ".dylib";
-#else
-        library = std::string("lib") + BAMBU_SOURCE_LIBRARY + ".so";
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": trying: " << library
+        << " [" << file_existence_note(library) << "]";
+    source_module = dlopen(library.c_str(), RTLD_LAZY);
+    if (!source_module) {
+        char* dll_error = dlerror();
+        std::string err = dll_error ? std::string(dll_error) : std::string("(null)");
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": dlopen failed: " << err
+            << " - BambuSource not available (live555 video streaming will not work)";
+    }
 #endif
-        source_module = dlopen( library.c_str(), RTLD_LAZY);
-    }*/
-#endif
+
+    if (source_module)
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": BambuSource loaded successfully, handle=" << source_module;
 
     return source_module;
 }
