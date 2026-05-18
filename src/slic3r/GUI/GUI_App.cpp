@@ -5869,6 +5869,10 @@ void GUI_App::reload_settings()
         std::map<std::string, std::map<std::string, std::string>> user_presets;
         m_agent->get_user_presets(&user_presets);
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << " cloud user preset number is: " << user_presets.size();
+        BOOST_LOG_TRIVIAL(info) << "[preset_reload] get_user_presets count=" << user_presets.size();
+        for (const auto &kv : user_presets) {
+            BOOST_LOG_TRIVIAL(info) << "[preset_reload] cloud map key=" << kv.first << " inner_keys=" << kv.second.size();
+        }
         preset_bundle->load_user_presets(*app_config, user_presets, ForwardCompatibilitySubstitutionRule::Enable);
         preset_bundle->save_user_presets(*app_config, get_delete_cache_presets());
         mainframe->update_side_preset_ui();
@@ -6086,15 +6090,19 @@ void GUI_App::start_sync_user_preset(bool with_progress_dlg)
                 long long update_time = 0;
                 if (!update_time_str.empty())
                     update_time = std::atoll(update_time_str.c_str());
+                bool need = false;
                 if (type == "filament") {
-                    return preset_bundle->filaments.need_sync(name, setting_id, update_time);
+                    need = preset_bundle->filaments.need_sync(name, setting_id, update_time);
                 } else if (type == "print") {
-                    return preset_bundle->prints.need_sync(name, setting_id, update_time);
+                    need = preset_bundle->prints.need_sync(name, setting_id, update_time);
                 } else if (type == "printer") {
-                    return preset_bundle->printers.need_sync(name, setting_id, update_time);
+                    need = preset_bundle->printers.need_sync(name, setting_id, update_time);
                 } else {
-                    return true;
+                    need = true;
                 }
+                BOOST_LOG_TRIVIAL(info) << "[preset_sync_check] type=" << type << " name=" << name
+                    << " setting_id=" << setting_id << " update_time=" << update_time << " need_sync=" << need;
+                return need;
             }, progressFn, cancelFn);
             BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << __LINE__ << " get_setting_list2 ret = " << ret << " m_is_closing = " << m_is_closing;
             finishFn(ret == 0);

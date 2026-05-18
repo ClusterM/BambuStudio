@@ -945,6 +945,22 @@ PresetsConfigSubstitutions PresetBundle::load_user_presets(AppConfig &          
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" filament's selected_idx %1%, selected_name %2%") %filaments.get_selected_idx() %filaments.get_selected_preset_name();
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" printers's selected_idx %1%, selected_name %2%") %printers.get_selected_idx() %printers.get_selected_preset_name();
 
+    {
+        std::string preset_folder_user_id = config.get("preset_folder");
+        size_t user_prints = 0, user_filaments = 0, user_printers = 0;
+        for (const auto &p : prints) {
+            if (p.is_user() && p.user_id.compare(preset_folder_user_id) == 0) ++user_prints;
+        }
+        for (const auto &p : filaments) {
+            if (p.is_user() && p.user_id.compare(preset_folder_user_id) == 0) ++user_filaments;
+        }
+        for (const auto &p : printers) {
+            if (p.is_user() && p.user_id.compare(preset_folder_user_id) == 0) ++user_printers;
+        }
+        BOOST_LOG_TRIVIAL(info) << "[preset_reload] load_user_presets before remove_users_preset: cloud_keys=" << my_presets.size()
+            << " local_user print=" << user_prints << " filament=" << user_filaments << " printer=" << user_printers;
+    }
+
     // Sync removing
     remove_users_preset(config, &my_presets);
 
@@ -1423,16 +1439,28 @@ int PresetBundle::validate_presets(const std::string &file_name, DynamicPrintCon
 
 void PresetBundle::remove_users_preset(AppConfig &config, std::map<std::string, std::map<std::string, std::string>> *my_presets)
 {
-    auto check_removed = [my_presets, this](Preset &preset) -> bool {
+    auto check_removed = [my_presets](Preset &preset) -> bool {
         if (my_presets == nullptr) return true;
         if (my_presets->find(preset.name) != my_presets->end()) return false;
-        if (!preset.sync_info.empty()) return false; // syncing, not remove
-        if (preset.setting_id.empty()) return false; // no id, not remove
+        if (!preset.sync_info.empty()) {
+            BOOST_LOG_TRIVIAL(debug) << "[remove_users_preset] keep (sync pending): name=" << preset.name
+                << " setting_id=" << preset.setting_id << " sync_info=" << preset.sync_info << " dirty=" << preset.is_dirty;
+            return false; // syncing, not remove
+        }
+        if (preset.setting_id.empty()) {
+            BOOST_LOG_TRIVIAL(debug) << "[remove_users_preset] keep (no setting_id): name=" << preset.name
+                << " sync_info=" << preset.sync_info << " dirty=" << preset.is_dirty;
+            return false; // no id, not remove
+        }
         // Saved preset is removed by another session
         if (preset.is_dirty) {
+            BOOST_LOG_TRIVIAL(info) << "[remove_users_preset] keep (dirty, clear setting_id): name=" << preset.name
+                << " setting_id=" << preset.setting_id << " sync_info=" << preset.sync_info;
             preset.setting_id.clear();
             return false;
         }
+        BOOST_LOG_TRIVIAL(info) << "[remove_users_preset] remove_files: name=" << preset.name
+            << " setting_id=" << preset.setting_id << " sync_info=" << preset.sync_info << " dirty=" << preset.is_dirty;
         preset.remove_files();
         return true;
     };
