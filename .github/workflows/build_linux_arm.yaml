@@ -1,4 +1,4 @@
-name: Build Linux
+name: Build ARM Linux
 
 on: [pull_request, workflow_dispatch]
 
