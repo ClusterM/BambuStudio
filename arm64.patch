@@ -1,0 +1,18 @@
+diff --git a/src/platform/unix/build_appimage.sh.in b/src/platform/unix/build_appimage.sh.in
+index a350dc372..49204c4db 100644
+--- a/src/platform/unix/build_appimage.sh.in
++++ b/src/platform/unix/build_appimage.sh.in
+@@ -1,5 +1,5 @@
+ #!/bin/sh
+-APPIMAGETOOLURL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
++APPIMAGETOOLURL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage"
+ 
+ 
+ APP_IMAGE="@SLIC3R_APP_KEY@_ubu64.AppImage"
+@@ -45,5 +45,5 @@ else
+   ../appimagetool.AppImage . $([ ! -z "${container}" ] && echo '--appimage-extract-and-run')
+ fi
+ 
+-mv @SLIC3R_APP_KEY@-x86_64.AppImage ${APP_IMAGE}
++mv @SLIC3R_APP_KEY@-aarch64.AppImage ${APP_IMAGE}
+ chmod +x ${APP_IMAGE}
