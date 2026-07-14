@@ -50,6 +50,43 @@ static std::string file_existence_note(const std::string& path)
     return "file does not exist on disk";
 }
 
+namespace {
+
+constexpr size_t CLOUD_LOG_BODY_MAX = 1024;
+
+static std::string cloud_trunc_body(const std::string &s)
+{
+    if (s.size() <= CLOUD_LOG_BODY_MAX)
+        return s;
+    return s.substr(0, CLOUD_LOG_BODY_MAX) + "...<truncated len=" + std::to_string(s.size()) + ">";
+}
+
+static std::string cloud_format_dev_list(const std::vector<std::string> &dev_list, size_t max_show = 6)
+{
+    std::string o = "count=" + std::to_string(dev_list.size()) + " [";
+    const size_t cap = dev_list.size() < max_show ? dev_list.size() : max_show;
+    for (size_t i = 0; i < cap; ++i) {
+        if (i) o += ',';
+        o += dev_list[i];
+    }
+    if (dev_list.size() > max_show)
+        o += ",...";
+    o += ']';
+    return o;
+}
+
+static std::string cloud_header_keys(const std::map<std::string, std::string> &h)
+{
+    std::string o;
+    for (const auto &kv : h) {
+        o += kv.first;
+        o += ';';
+    }
+    return "header_key_count=" + std::to_string(h.size()) + " keys=" + o;
+}
+
+} // namespace
+
 #define BAMBU_SOURCE_LIBRARY "BambuSource"
 
 #if defined(_MSC_VER) || defined(_WIN32)
@@ -733,7 +770,9 @@ int NetworkAgent::init_log()
 {
     int ret = 0;
     if (network_agent && init_log_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] init_log enter agent=" << network_agent;
         ret = init_log_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] init_log ret=" << ret << " agent=" << network_agent;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")%network_agent %ret;
     }
@@ -744,7 +783,9 @@ int NetworkAgent::set_config_dir(std::string config_dir)
 {
     int ret = 0;
     if (network_agent && set_config_dir_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_config_dir dir=" << config_dir;
         ret = set_config_dir_ptr(network_agent, config_dir);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_config_dir ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, config_dir=%3%")%network_agent %ret %config_dir ;
     }
@@ -755,7 +796,9 @@ int NetworkAgent::set_cert_file(std::string folder, std::string filename)
 {
     int ret = 0;
     if (network_agent && set_cert_file_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_cert_file folder=" << folder << " file=" << filename;
         ret = set_cert_file_ptr(network_agent, folder, filename);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_cert_file ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, folder=%3%, filename=%4%")%network_agent %ret %folder %filename;
     }
@@ -766,7 +809,9 @@ int NetworkAgent::set_country_code(std::string country_code)
 {
     int ret = 0;
     if (network_agent && set_country_code_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_country_code code=" << country_code;
         ret = set_country_code_ptr(network_agent, country_code);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_country_code ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, country_code=%3%")%network_agent %ret %country_code ;
     }
@@ -777,7 +822,9 @@ int NetworkAgent::start()
 {
     int ret = 0;
     if (network_agent && start_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start enter agent=" << network_agent;
         ret = start_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")%network_agent %ret;
     }
@@ -920,7 +967,9 @@ int NetworkAgent::connect_server()
 {
     int ret = 0;
     if (network_agent && connect_server_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] connect_server enter";
         ret = connect_server_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] connect_server ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")%network_agent %ret;
     }
@@ -932,7 +981,7 @@ bool NetworkAgent::is_server_connected()
     bool ret = false;
     if (network_agent && is_server_connected_ptr) {
         ret = is_server_connected_ptr(network_agent);
-        //BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")%network_agent %ret;
+        BOOST_LOG_TRIVIAL(trace) << "[cloud_plugin] is_server_connected -> " << ret;
     }
     return ret;
 }
@@ -941,7 +990,9 @@ int NetworkAgent::refresh_connection()
 {
     int ret = 0;
     if (network_agent && refresh_connection_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] refresh_connection enter";
         ret = refresh_connection_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] refresh_connection ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")%network_agent %ret;
     }
@@ -952,7 +1003,9 @@ int NetworkAgent::start_subscribe(std::string module)
 {
     int ret = 0;
     if (network_agent && start_subscribe_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_subscribe module=" << module;
         ret = start_subscribe_ptr(network_agent, module);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_subscribe ret=" << ret << " module=" << module;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, module=%3%")%network_agent %ret %module ;
     }
@@ -963,7 +1016,9 @@ int NetworkAgent::stop_subscribe(std::string module)
 {
     int ret = 0;
     if (network_agent && stop_subscribe_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] stop_subscribe module=" << module;
         ret = stop_subscribe_ptr(network_agent, module);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] stop_subscribe ret=" << ret << " module=" << module;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, module=%3%")%network_agent %ret %module ;
     }
@@ -974,7 +1029,9 @@ int NetworkAgent::add_subscribe(std::vector<std::string> dev_list)
 {
     int ret = 0;
     if (network_agent && add_subscribe_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] add_subscribe " << cloud_format_dev_list(dev_list);
         ret = add_subscribe_ptr(network_agent, dev_list);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] add_subscribe ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret;
     }
@@ -985,7 +1042,9 @@ int NetworkAgent::del_subscribe(std::vector<std::string> dev_list)
 {
     int ret = 0;
     if (network_agent && del_subscribe_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] del_subscribe " << cloud_format_dev_list(dev_list);
         ret = del_subscribe_ptr(network_agent, dev_list);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] del_subscribe ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret;
     }
@@ -995,6 +1054,7 @@ int NetworkAgent::del_subscribe(std::vector<std::string> dev_list)
 void NetworkAgent::enable_multi_machine(bool enable)
 {
     if (network_agent && enable_multi_machine_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] enable_multi_machine enable=" << enable;
         enable_multi_machine_ptr(network_agent, enable);
     }
 }
@@ -1004,6 +1064,9 @@ int NetworkAgent::send_message(std::string dev_id, std::string json_str, int qos
     int ret = 0;
     if (network_agent && send_message_ptr) {
         ret = send_message_ptr(network_agent, dev_id, json_str, qos, flag);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] send_message ret=" << ret << " dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id)
+            << " qos=" << qos << " flag=" << flag << " json_len=" << json_str.size()
+            << " json=" << cloud_trunc_body(json_str);
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ <<
             boost::format(" error: network_agent=%1%, ret=%2%, dev_id=%3%, json_str=%4%, qos=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id) %json_str %qos;
@@ -1015,7 +1078,10 @@ int NetworkAgent::connect_printer(std::string dev_id, std::string dev_ip, std::s
 {
     int ret = 0;
     if (network_agent && connect_printer_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] connect_printer dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id)
+            << " dev_ip=" << BBLCrossTalk::Crosstalk_DevIP(dev_ip) << " use_ssl=" << use_ssl << " user_len=" << username.size();
         ret = connect_printer_ptr(network_agent, dev_id, dev_ip, username, password, use_ssl);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] connect_printer ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ <<
             (boost::format(" error: network_agent=%1%, ret=%2%, dev_id=%3%, dev_ip=%4%, username=%5%, password=%6%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id) %BBLCrossTalk::Crosstalk_DevIP(dev_ip) %username %password).str();
@@ -1027,7 +1093,9 @@ int NetworkAgent::disconnect_printer()
 {
     int ret = 0;
     if (network_agent && disconnect_printer_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] disconnect_printer enter";
         ret = disconnect_printer_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] disconnect_printer ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret;
     }
@@ -1039,6 +1107,9 @@ int NetworkAgent::send_message_to_printer(std::string dev_id, std::string json_s
     int ret = 0;
     if (network_agent && send_message_to_printer_ptr) {
         ret = send_message_to_printer_ptr(network_agent, dev_id, json_str, qos, flag);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] send_message_to_printer ret=" << ret << " dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id)
+            << " qos=" << qos << " flag=" << flag << " json_len=" << json_str.size()
+            << " json=" << cloud_trunc_body(json_str);
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, dev_id=%3%, json_str=%4%, qos=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id) %json_str %qos;
     }
@@ -1049,7 +1120,9 @@ int NetworkAgent::check_cert()
 {
     int ret = 0;
     if (network_agent && check_cert_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] check_cert enter";
         ret = check_cert_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] check_cert ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret;
     }
@@ -1059,6 +1132,7 @@ int NetworkAgent::check_cert()
 void NetworkAgent::install_device_cert(std::string dev_id, bool lan_only)
 {
     if (network_agent && install_device_cert_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] install_device_cert dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id) << " lan_only=" << lan_only;
         install_device_cert_ptr(network_agent, dev_id, lan_only);
     }
 }
@@ -1067,8 +1141,9 @@ bool NetworkAgent::start_discovery(bool start, bool sending)
 {
     bool ret = false;
     if (network_agent && start_discovery_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_discovery start=" << start << " sending=" << sending;
         ret = start_discovery_ptr(network_agent, start, sending);
-        //BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, start=%3%, sending=%4%")%network_agent %ret %start %sending;
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_discovery ret=" << ret;
     }
     return ret;
 }
@@ -1077,7 +1152,9 @@ int  NetworkAgent::change_user(std::string user_info)
 {
     int ret = 0;
     if (network_agent && change_user_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] change_user payload_len=" << user_info.size();
         ret = change_user_ptr(network_agent, user_info);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] change_user ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret ;
     }
@@ -1089,6 +1166,7 @@ bool NetworkAgent::is_user_login()
     bool ret = false;
     if (network_agent && is_user_login_ptr) {
         ret = is_user_login_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(trace) << "[cloud_plugin] is_user_login -> " << ret;
     }
     return ret;
 }
@@ -1097,7 +1175,9 @@ int  NetworkAgent::user_logout(bool request)
 {
     int ret = 0;
     if (network_agent && user_logout_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] user_logout request=" << request;
         ret = user_logout_ptr(network_agent, request);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] user_logout ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret;
     }
@@ -1109,6 +1189,7 @@ std::string NetworkAgent::get_user_id()
     std::string ret;
     if (network_agent && get_user_id_ptr) {
         ret = get_user_id_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] get_user_id len=" << ret.size();
     }
     return ret;
 }
@@ -1118,6 +1199,7 @@ std::string NetworkAgent::get_user_name()
     std::string ret;
     if (network_agent && get_user_name_ptr) {
         ret = get_user_name_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] get_user_name len=" << ret.size();
     }
     return ret;
 }
@@ -1127,6 +1209,7 @@ std::string NetworkAgent::get_user_avatar()
     std::string ret;
     if (network_agent && get_user_avatar_ptr) {
         ret = get_user_avatar_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] get_user_avatar len=" << ret.size();
     }
     return ret;
 }
@@ -1136,6 +1219,7 @@ std::string NetworkAgent::get_user_nickanme()
     std::string ret;
     if (network_agent && get_user_nickanme_ptr) {
         ret = get_user_nickanme_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] get_user_nickanme len=" << ret.size();
     }
     return ret;
 }
@@ -1145,6 +1229,7 @@ std::string NetworkAgent::build_login_cmd()
     std::string ret;
     if (network_agent && build_login_cmd_ptr) {
         ret = build_login_cmd_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] build_login_cmd out_len=" << ret.size();
     }
     return ret;
 }
@@ -1154,6 +1239,7 @@ std::string NetworkAgent::build_logout_cmd()
     std::string ret;
     if (network_agent && build_logout_cmd_ptr) {
         ret = build_logout_cmd_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] build_logout_cmd out_len=" << ret.size();
     }
     return ret;
 }
@@ -1163,6 +1249,7 @@ std::string NetworkAgent::build_login_info()
     std::string ret;
     if (network_agent && build_login_info_ptr) {
         ret = build_login_info_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] build_login_info out_len=" << ret.size();
     }
     return ret;
 }
@@ -1171,7 +1258,9 @@ int NetworkAgent::ping_bind(std::string ping_code)
 {
     int ret = 0;
     if (network_agent && ping_bind_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] ping_bind code_len=" << ping_code.size();
         ret = ping_bind_ptr(network_agent, ping_code);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] ping_bind ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")
             % network_agent % ret;
@@ -1183,7 +1272,9 @@ int NetworkAgent::bind_detect(std::string dev_ip, std::string sec_link, detectRe
 {
     int ret = 0;
     if (network_agent && bind_detect_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] bind_detect dev_ip=" << BBLCrossTalk::Crosstalk_DevIP(dev_ip) << " sec_link_len=" << sec_link.size();
         ret = bind_detect_ptr(network_agent, dev_ip, sec_link, detect);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] bind_detect ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, dev_ip=%3%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevIP(dev_ip);
     }
@@ -1194,7 +1285,9 @@ int NetworkAgent::report_consent(std::string expand)
 {
     int ret = 0;
     if (network_agent && report_consent_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] report_consent expand_len=" << expand.size();
         ret = report_consent_ptr(network_agent, expand);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] report_consent ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1216,8 +1309,11 @@ int NetworkAgent::set_server_callback(OnServerErrFn fn)
 int NetworkAgent::bind(std::string dev_ip, std::string dev_id, std::string dev_model, std::string sec_link, std::string timezone,  bool improved, OnUpdateStatusFn update_fn)
 {
     int ret = 0;
-    if (network_agent && bind_ptr) {
+    if (network_agent && bind_ptr) {        
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] bind dev_ip=" << BBLCrossTalk::Crosstalk_DevIP(dev_ip)
+            << " dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id) << " dev_model=" << dev_model << " tz=" << timezone << " improved=" << improved;
         ret = bind_ptr(network_agent, dev_ip, dev_id, dev_model, sec_link, timezone, improved, update_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] bind ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, dev_ip=%3%, timezone=%4%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevIP(dev_ip) %timezone;
     }
@@ -1228,7 +1324,9 @@ int NetworkAgent::unbind(std::string dev_id)
 {
     int ret = 0;
     if (network_agent && unbind_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] unbind dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id);
         ret = unbind_ptr(network_agent, dev_id);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] unbind ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret ;
     }
@@ -1240,6 +1338,7 @@ std::string NetworkAgent::get_bambulab_host()
     std::string ret;
     if (network_agent && get_bambulab_host_ptr) {
         ret = get_bambulab_host_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_bambulab_host host_len=" << ret.size();
     }
     return ret;
 }
@@ -1249,6 +1348,7 @@ std::string NetworkAgent::get_user_selected_machine()
     std::string ret;
     if (network_agent && get_user_selected_machine_ptr) {
         ret = get_user_selected_machine_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] get_user_selected_machine dev_id=" << BBLCrossTalk::Crosstalk_DevId(ret);
     }
     return ret;
 }
@@ -1257,7 +1357,9 @@ int NetworkAgent::set_user_selected_machine(std::string dev_id)
 {
     int ret = 0;
     if (network_agent && set_user_selected_machine_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_user_selected_machine dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id);
         ret = set_user_selected_machine_ptr(network_agent, dev_id);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_user_selected_machine ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, user_info=%3%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id);
     }
@@ -1268,7 +1370,10 @@ int NetworkAgent::start_print(PrintParams params, OnUpdateStatusFn update_fn, Wa
 {
     int ret = 0;
     if (network_agent && start_print_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_print dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id)
+            << " task=" << params.task_name << " project=" << params.project_name;
         ret = start_print_ptr(network_agent, params, update_fn, cancel_fn, wait_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_print ret=" << ret << " dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id);
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__
                                 << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%, task_name=%4%, project_name=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(params.dev_id) %params.task_name %params.project_name;
     }
@@ -1279,7 +1384,10 @@ int NetworkAgent::start_local_print_with_record(PrintParams params, OnUpdateStat
 {
     int ret = 0;
     if (network_agent && start_local_print_with_record_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_local_print_with_record dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id)
+            << " task=" << params.task_name;
         ret = start_local_print_with_record_ptr(network_agent, params, update_fn, cancel_fn, wait_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_local_print_with_record ret=" << ret;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%, task_name=%4%, project_name=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(params.dev_id) %params.task_name %params.project_name;
     }
     return ret;
@@ -1289,7 +1397,10 @@ int NetworkAgent::start_send_gcode_to_sdcard(PrintParams params, OnUpdateStatusF
 {
     int ret = 0;
     if (network_agent && start_send_gcode_to_sdcard_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_send_gcode_to_sdcard dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id)
+            << " task=" << params.task_name;
         ret = start_send_gcode_to_sdcard_ptr(network_agent, params, update_fn, cancel_fn, wait_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_send_gcode_to_sdcard ret=" << ret;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%, task_name=%4%, project_name=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(params.dev_id) %params.task_name %params.project_name;
     }
     return ret;
@@ -1299,7 +1410,10 @@ int NetworkAgent::start_local_print(PrintParams params, OnUpdateStatusFn update_
 {
     int ret = BAMBU_NETWORK_ERR_INVALID_HANDLE;
     if (network_agent && start_local_print_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_local_print dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id)
+            << " task=" << params.task_name;
         ret = start_local_print_ptr(network_agent, params, update_fn, cancel_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_local_print ret=" << ret;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%, task_name=%4%, project_name=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(params.dev_id) %params.task_name %params.project_name;
     } else {
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" invalid handle: network_agent=%1%, start_local_print_ptr=%2%, dev_id=%3%") % network_agent % start_local_print_ptr % BBLCrossTalk::Crosstalk_DevId(params.dev_id);
@@ -1311,7 +1425,10 @@ int NetworkAgent::start_sdcard_print(PrintParams params, OnUpdateStatusFn update
 {
     int ret = 0;
     if (network_agent && start_sdcard_print_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_sdcard_print dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id)
+            << " task=" << params.task_name;
         ret = start_sdcard_print_ptr(network_agent, params, update_fn, cancel_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_sdcard_print ret=" << ret;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%, task_name=%4%, project_name=%5%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(params.dev_id) %params.task_name %params.project_name;
     }
     return ret;
@@ -1322,7 +1439,14 @@ int NetworkAgent::get_user_presets(std::map<std::string, std::map<std::string, s
     int ret = 0;
     if (network_agent && get_user_presets_ptr) {
         ret = get_user_presets_ptr(network_agent, user_presets);
-        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, setting_id count=%3%")%network_agent %ret %user_presets->size() ;
+        size_t inner_kv = 0;
+        if (user_presets) {
+            for (const auto &kv : *user_presets)
+                inner_kv += kv.second.size();
+        }
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_presets ret=" << ret << " outer=" << (user_presets ? user_presets->size() : 0)
+            << " inner_kv_total=" << inner_kv;
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, setting_id count=%3%")%network_agent %ret %(user_presets ? user_presets->size() : 0) ;
     }
     return ret;
 }
@@ -1331,20 +1455,27 @@ std::string NetworkAgent::request_setting_id(std::string name, std::map<std::str
 {
     std::string ret;
     if (network_agent && request_setting_id_ptr) {
+        const size_t map_sz = values_map ? values_map->size() : 0;
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] request_setting_id name=" << name << " map_keys=" << map_sz;
         ret = request_setting_id_ptr(network_agent, name, values_map, http_code);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] request_setting_id ret_len=" << ret.size()
+            << " http_code=" << (http_code ? *http_code : 0u);
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, name=%2%, http_code=%3%, ret.setting_id=%4%")
-                %network_agent %name %(*http_code) %ret;
+                %network_agent %name %(http_code ? *http_code : 0u) %ret;
     }
     return ret;
 }
 
 int NetworkAgent::put_setting(std::string setting_id, std::string name, std::map<std::string, std::string>* values_map, unsigned int* http_code)
 {
-    int ret;
+    int ret = 0;
     if (network_agent && put_setting_ptr) {
+        const size_t map_sz = values_map ? values_map->size() : 0;
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] put_setting setting_id=" << setting_id << " name=" << name << " map_keys=" << map_sz;
         ret = put_setting_ptr(network_agent, setting_id, name, values_map, http_code);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] put_setting ret=" << ret << " http_code=" << (http_code ? *http_code : 0u);
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, setting_id=%2%, name=%3%, http_code=%4%, ret=%5%")
-                %network_agent %setting_id %name %(*http_code) %ret;
+                %network_agent %setting_id %name %(http_code ? *http_code : 0u) %ret;
     }
     return ret;
 }
@@ -1353,7 +1484,9 @@ int NetworkAgent::get_setting_list(std::string bundle_version, ProgressFn pro_fn
 {
     int ret = 0;
     if (network_agent && get_setting_list_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_setting_list bundle_version=" << bundle_version;
         ret = get_setting_list_ptr(network_agent, bundle_version, pro_fn, cancel_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_setting_list ret=" << ret << " bundle_version=" << bundle_version;
         if (ret) BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, bundle_version=%3%") % network_agent % ret % bundle_version;
     }
     return ret;
@@ -1363,10 +1496,14 @@ int NetworkAgent::get_setting_list2(std::string bundle_version, CheckFn chk_fn, 
 {
     int ret = 0;
     if (network_agent && get_setting_list2_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_setting_list2 bundle_version=" << bundle_version;
         ret = get_setting_list2_ptr(network_agent, bundle_version, chk_fn, pro_fn, cancel_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_setting_list2 ret=" << ret << " bundle_version=" << bundle_version;
         if (ret) BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, bundle_version=%3%") % network_agent % ret % bundle_version;
     } else {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_setting_list2 fallback get_setting_list bundle_version=" << bundle_version;
         ret = get_setting_list(bundle_version, pro_fn, cancel_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_setting_list2 fallback ret=" << ret;
     }
     return ret;
 }
@@ -1375,7 +1512,9 @@ int NetworkAgent::delete_setting(std::string setting_id)
 {
     int ret = 0;
     if (network_agent && delete_setting_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] delete_setting setting_id=" << setting_id;
         ret = delete_setting_ptr(network_agent, setting_id);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] delete_setting ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, setting_id=%3%")%network_agent %ret %setting_id ;
     }
@@ -1387,6 +1526,7 @@ std::string NetworkAgent::get_studio_info_url()
     std::string ret;
     if (network_agent && get_studio_info_url_ptr) {
         ret = get_studio_info_url_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_studio_info_url len=" << ret.size();
     }
     return ret;
 }
@@ -1395,7 +1535,9 @@ int NetworkAgent::set_extra_http_header(std::map<std::string, std::string> extra
 {
     int ret = 0;
     if (network_agent && set_extra_http_header_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_extra_http_header " << cloud_header_keys(extra_headers);
         ret = set_extra_http_header_ptr(network_agent, extra_headers);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] set_extra_http_header ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, extra_headers count=%3%")%network_agent %ret %extra_headers.size() ;
     }
@@ -1406,7 +1548,11 @@ int NetworkAgent::get_my_message(int type, int after, int limit, unsigned int* h
 {
     int ret = 0;
     if (network_agent && get_my_message_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_my_message type=" << type << " after=" << after << " limit=" << limit;
         ret = get_my_message_ptr(network_agent, type, after, limit, http_code, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_my_message ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1418,7 +1564,9 @@ int NetworkAgent::check_user_task_report(int* task_id, bool* printable)
     int ret = 0;
     if (network_agent && check_user_task_report_ptr) {
         ret = check_user_task_report_ptr(network_agent, task_id, printable);
-        BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, task_id=%3%, printable=%4%")%network_agent %ret %(*task_id) %(*printable);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] check_user_task_report ret=" << ret
+            << " task_id=" << (task_id ? *task_id : 0) << " printable=" << (printable ? *printable : false);
+        BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, task_id=%3%, printable=%4%")%network_agent %ret %(task_id ? *task_id : 0) %(printable ? *printable : false);
     }
     return ret;
 }
@@ -1427,8 +1575,13 @@ int NetworkAgent::get_user_print_info(unsigned int* http_code, std::string* http
 {
     int ret = 0;
     if (network_agent && get_user_print_info_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_print_info enter";
         ret = get_user_print_info_ptr(network_agent, http_code, http_body);
-        BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, http_code=%3%")%network_agent %ret %(*http_code);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_print_info ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " body_len=" << (http_body ? http_body->size() : size_t(0))
+            << " body_preview=" << cloud_trunc_body(http_body ? *http_body : std::string());
+        BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, http_code=%3%")%network_agent %ret %(http_code ? *http_code : 0u);
     }
     return ret;
 }
@@ -1437,7 +1590,11 @@ int NetworkAgent::get_user_tasks(TaskQueryParams params, std::string* http_body)
 {
     int ret = 0;
     if (network_agent && get_user_tasks_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_tasks dev_id=" << BBLCrossTalk::Crosstalk_DevId(params.dev_id)
+            << " status=" << params.status << " offset=" << params.offset << " limit=" << params.limit;
         ret = get_user_tasks_ptr(network_agent, params, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_tasks ret=" << ret
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") %network_agent %ret;
     }
     return ret;
@@ -1450,7 +1607,11 @@ int NetworkAgent::get_filament_spools(FilamentQueryParams params, std::string* h
             << network_agent << " func_ptr=" << (void*)get_filament_spools_ptr << ")";
         return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     }
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_filament_spools cat=" << params.category << " status=" << params.status
+        << " offset=" << params.offset << " limit=" << params.limit;
     int ret = get_filament_spools_ptr(network_agent, params, http_body);
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_filament_spools ret=" << ret
+        << " body_len=" << (http_body ? http_body->size() : size_t(0));
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%") %network_agent %ret;
     return ret;
 }
@@ -1462,7 +1623,10 @@ int NetworkAgent::create_filament_spool(std::string request_body, std::string* h
             << network_agent << " func_ptr=" << (void*)create_filament_spool_ptr << ")";
         return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     }
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] create_filament_spool body_len=" << request_body.size();
     int ret = create_filament_spool_ptr(network_agent, request_body, http_body);
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] create_filament_spool ret=" << ret
+        << " resp_len=" << (http_body ? http_body->size() : size_t(0));
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%") %network_agent %ret;
     return ret;
 }
@@ -1474,7 +1638,9 @@ int NetworkAgent::update_filament_spool(std::string spool_id, std::string reques
             << network_agent << " func_ptr=" << (void*)update_filament_spool_ptr << ")";
         return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     }
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] update_filament_spool spool_id=" << spool_id << " body_len=" << request_body.size();
     int ret = update_filament_spool_ptr(network_agent, spool_id, request_body, http_body);
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] update_filament_spool ret=" << ret;
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, spool_id=%3%") %network_agent %ret %spool_id;
     return ret;
 }
@@ -1486,7 +1652,10 @@ int NetworkAgent::delete_filament_spools(FilamentDeleteParams params, std::strin
             << network_agent << " func_ptr=" << (void*)delete_filament_spools_ptr << ")";
         return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     }
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] delete_filament_spools id_count=" << params.ids.size()
+        << " rfid_count=" << params.rfids.size();
     int ret = delete_filament_spools_ptr(network_agent, params, http_body);
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] delete_filament_spools ret=" << ret;
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%") %network_agent %ret;
     return ret;
 }
@@ -1498,7 +1667,10 @@ int NetworkAgent::get_filament_config(std::string* http_body)
             << network_agent << " func_ptr=" << (void*)get_filament_config_ptr << ")";
         return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     }
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_filament_config enter";
     int ret = get_filament_config_ptr(network_agent, http_body);
+    BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_filament_config ret=" << ret
+        << " body_len=" << (http_body ? http_body->size() : size_t(0));
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%") %network_agent %ret;
     return ret;
 }
@@ -1507,7 +1679,11 @@ int NetworkAgent::get_printer_firmware(std::string dev_id, unsigned* http_code, 
 {
     int ret = 0;
     if (network_agent && get_printer_firmware_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_printer_firmware dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id);
         ret = get_printer_firmware_ptr(network_agent, dev_id, http_code, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_printer_firmware ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id);
     }
     return ret;
@@ -1517,7 +1693,10 @@ int NetworkAgent::get_task_plate_index(std::string task_id, int* plate_index)
 {
     int ret = 0;
     if (network_agent && get_task_plate_index_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_task_plate_index task_id=" << task_id;
         ret = get_task_plate_index_ptr(network_agent, task_id, plate_index);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_task_plate_index ret=" << ret
+            << " plate_index=" << (plate_index ? *plate_index : -1);
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, task_id=%3%")%network_agent %ret %task_id;
     }
@@ -1528,7 +1707,10 @@ int NetworkAgent::get_user_info(int* identifier)
 {
     int ret = 0;
     if (network_agent && get_user_info_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_info enter";
         ret = get_user_info_ptr(network_agent, identifier);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_user_info ret=" << ret
+            << " identifier=" << (identifier ? *identifier : 0);
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1539,7 +1721,10 @@ int NetworkAgent::request_bind_ticket(std::string* ticket)
 {
     int ret = 0;
     if (network_agent && request_bind_ticket_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] request_bind_ticket enter";
         ret = request_bind_ticket_ptr(network_agent, ticket);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] request_bind_ticket ret=" << ret
+            << " ticket_len=" << (ticket ? ticket->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1550,7 +1735,12 @@ int NetworkAgent::get_subtask_info(std::string subtask_id, std::string* task_jso
 {
     int ret = 0;
     if (network_agent && get_subtask_info_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_subtask_info subtask_id=" << subtask_id;
         ret = get_subtask_info_ptr(network_agent, subtask_id, task_json, http_code, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_subtask_info ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " task_json_len=" << (task_json ? task_json->size() : size_t(0))
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1559,20 +1749,29 @@ int NetworkAgent::get_subtask_info(std::string subtask_id, std::string* task_jso
 
 int NetworkAgent::get_slice_info(std::string project_id, std::string profile_id, int plate_index, std::string* slice_json)
 {
-    int ret;
+    int ret = 0;
     if (network_agent && get_slice_info_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_slice_info project_id=" << project_id
+            << " profile_id=" << profile_id << " plate_index=" << plate_index;
         ret = get_slice_info_ptr(network_agent, project_id, profile_id, plate_index, slice_json);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_slice_info ret=" << ret
+            << " slice_json_len=" << (slice_json ? slice_json->size() : size_t(0))
+            << " preview=" << cloud_trunc_body(slice_json ? *slice_json : std::string());
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(" : network_agent=%1%, project_id=%2%, profile_id=%3%, plate_index=%4%, slice_json=%5%")
-                %network_agent %project_id %profile_id %plate_index %(*slice_json);
+                %network_agent %project_id %profile_id %plate_index %(slice_json ? *slice_json : std::string());
     }
     return ret;
 }
 
 int NetworkAgent::query_bind_status(std::vector<std::string> query_list, unsigned int* http_code, std::string* http_body)
 {
-    int ret;
+    int ret = 0;
     if (network_agent && query_bind_status_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] query_bind_status " << cloud_format_dev_list(query_list);
         ret = query_bind_status_ptr(network_agent, query_list, http_code, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] query_bind_status ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, http_code=%3%") %network_agent %ret %(*http_code);
     }
@@ -1583,7 +1782,9 @@ int NetworkAgent::modify_printer_name(std::string dev_id, std::string dev_name)
 {
     int ret = 0;
     if (network_agent && modify_printer_name_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] modify_printer_name dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id) << " name=" << dev_name;
         ret = modify_printer_name_ptr(network_agent, dev_id, dev_name);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] modify_printer_name ret=" << ret;
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(" : network_agent=%1%, ret=%2%, dev_id=%3%, dev_name=%4%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id) %dev_name;
     }
     return ret;
@@ -1593,7 +1794,9 @@ int NetworkAgent::get_camera_url(std::string dev_id, std::function<void(std::str
 {
     int ret = 0;
     if (network_agent && get_camera_url_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_camera_url dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id);
         ret = get_camera_url_ptr(network_agent, dev_id, callback);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_camera_url ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, dev_id=%3%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id);
     }
@@ -1604,7 +1807,10 @@ int NetworkAgent::get_camera_url_for_golive(std::string dev_id, std::string sdev
 {
     int ret = 0;
     if (network_agent && get_camera_url_for_golive_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_camera_url_for_golive dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id)
+            << " sdev_id=" << sdev_id;
         ret = get_camera_url_for_golive_ptr(network_agent, dev_id, sdev_id, callback);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_camera_url_for_golive ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%, dev_id=%3%") %network_agent %ret %BBLCrossTalk::Crosstalk_DevId(dev_id);
     }
@@ -1615,7 +1821,9 @@ int NetworkAgent::get_design_staffpick(int offset, int limit, std::function<void
 {
     int ret = 0;
     if (network_agent && get_design_staffpick_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_design_staffpick offset=" << offset << " limit=" << limit;
         ret = get_design_staffpick_ptr(network_agent, offset, limit, callback);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_design_staffpick ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%")%network_agent %ret;
     }
@@ -1626,7 +1834,9 @@ int NetworkAgent::get_mw_user_preference(std::function<void(std::string)> callba
 {
     int ret = 0;
     if (network_agent && get_mw_user_preference_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_mw_user_preference enter";
         ret = get_mw_user_preference_ptr(network_agent,callback);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_mw_user_preference ret=" << ret;
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
@@ -1637,7 +1847,9 @@ int NetworkAgent::get_mw_user_4ulist(int seed, int limit, std::function<void(std
 {
     int ret = 0;
     if (network_agent && get_mw_user_4ulist_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_mw_user_4ulist seed=" << seed << " limit=" << limit;
         ret = get_mw_user_4ulist_ptr(network_agent,seed, limit, callback);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_mw_user_4ulist ret=" << ret;
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
@@ -1647,7 +1859,9 @@ int NetworkAgent::get_hms_snapshot(std::string dev_id, std::string file_name, st
 {
     int ret = -1;
     if (network_agent && get_hms_snapshot_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_hms_snapshot dev_id=" << BBLCrossTalk::Crosstalk_DevId(dev_id) << " file=" << file_name;
         ret = get_hms_snapshot_ptr(network_agent, dev_id, file_name, callback);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_hms_snapshot ret=" << ret;
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
@@ -1681,7 +1895,10 @@ int NetworkAgent::start_publish(PublishParams params, OnUpdateStatusFn update_fn
 {
     int ret = 0;
     if (network_agent && start_publish_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_publish project=" << params.project_name
+            << " design_id=" << params.design_id << " model_id=" << params.project_model_id;
         ret = start_publish_ptr(network_agent, params, update_fn, cancel_fn, out);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] start_publish ret=" << ret << " out_len=" << (out ? out->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1692,7 +1909,9 @@ int NetworkAgent::get_model_publish_url(std::string* url)
 {
     int ret = 0;
     if (network_agent && get_model_publish_url_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_publish_url enter";
         ret = get_model_publish_url_ptr(network_agent, url);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_publish_url ret=" << ret << " url_len=" << (url ? url->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1703,7 +1922,9 @@ int NetworkAgent::get_subtask(BBLModelTask* task, OnGetSubTaskFn getsub_fn)
 {
     int ret = 0;
     if (network_agent && get_subtask_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_subtask enter";
         ret = get_subtask_ptr(network_agent, task, getsub_fn);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_subtask ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1715,7 +1936,9 @@ int NetworkAgent::get_model_mall_home_url(std::string* url)
 {
     int ret = 0;
     if (network_agent && get_model_publish_url_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_mall_home_url enter";
         ret = get_model_mall_home_url_ptr(network_agent, url);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_mall_home_url ret=" << ret << " url_len=" << (url ? url->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1726,7 +1949,9 @@ int NetworkAgent::get_model_mall_detail_url(std::string* url, std::string id)
 {
     int ret = 0;
     if (network_agent && get_model_publish_url_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_mall_detail_url id=" << id;
         ret = get_model_mall_detail_url_ptr(network_agent, url, id);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_mall_detail_url ret=" << ret << " url_len=" << (url ? url->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
@@ -1737,7 +1962,11 @@ int NetworkAgent::get_my_profile(std::string token, unsigned int *http_code, std
 {
     int ret = 0;
     if (network_agent && get_my_profile_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_my_profile token_len=" << token.size();
         ret = get_my_profile_ptr(network_agent, token, http_code, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_my_profile ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1748,7 +1977,11 @@ int NetworkAgent::get_my_token(std::string ticket, unsigned int* http_code, std:
 {
     int ret = 0;
     if (network_agent && get_my_token_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_my_token ticket_len=" << ticket.size();
         ret = get_my_token_ptr(network_agent, ticket, http_code, http_body);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_my_token ret=" << ret
+            << " http_code=" << (http_code ? *http_code : 0u)
+            << " body_len=" << (http_body ? http_body->size() : size_t(0));
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1760,7 +1993,9 @@ int NetworkAgent::track_enable(bool enable)
     enable_track = enable;
     int ret = 0;
     if (network_agent && track_enable_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] track_enable enable=" << enable;
         ret = track_enable_ptr(network_agent, enable);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] track_enable ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1771,7 +2006,9 @@ int NetworkAgent::track_remove_files()
 {
     int ret = 0;
     if (network_agent && track_remove_files_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] track_remove_files enter";
         ret = track_remove_files_ptr(network_agent);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] track_remove_files ret=" << ret;
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
     return ret;
@@ -1787,7 +2024,9 @@ int NetworkAgent::track_event(std::string evt_key, std::string content)
 
     int ret = 0;
     if (network_agent && track_event_ptr) {
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_event key=" << evt_key << " content_len=" << content.size();
         ret = track_event_ptr(network_agent, evt_key, content);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_event ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1800,7 +2039,9 @@ int NetworkAgent::track_header(std::string header)
         return 0;
     int ret = 0;
     if (network_agent && track_header_ptr) {
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_header len=" << header.size() << " preview=" << cloud_trunc_body(header);
         ret = track_header_ptr(network_agent, header);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_header ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1814,7 +2055,9 @@ int NetworkAgent::track_update_property(std::string name, std::string value, std
 
     int ret = 0;
     if (network_agent && track_update_property_ptr) {
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_update_property name=" << name << " type=" << type << " value_len=" << value.size();
         ret = track_update_property_ptr(network_agent, name, value, type);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_update_property ret=" << ret;
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1828,7 +2071,9 @@ int NetworkAgent::track_get_property(std::string name, std::string& value, std::
 
     int ret = 0;
     if (network_agent && track_get_property_ptr) {
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_get_property name=" << name << " type=" << type;
         ret = track_get_property_ptr(network_agent, name, value, type);
+        BOOST_LOG_TRIVIAL(debug) << "[cloud_plugin] track_get_property ret=" << ret << " value_len=" << value.size();
         if (ret)
             BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format("error network_agnet=%1%, ret = %2%") % network_agent % ret;
     }
@@ -1839,7 +2084,10 @@ int NetworkAgent::put_model_mall_rating(int rating_id, int score, std::string co
 {
     int ret = 0;
     if (network_agent && get_model_publish_url_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] put_model_mall_rating id=" << rating_id << " score=" << score
+            << " images=" << images.size() << " content_len=" << content.size();
         ret = put_model_mall_rating_url_ptr(network_agent, rating_id, score, content, images, http_code, http_error);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] put_model_mall_rating ret=" << ret << " http_code=" << http_code;
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
@@ -1849,7 +2097,9 @@ int NetworkAgent::get_oss_config(std::string &config, std::string country_code, 
 {
     int ret = 0;
     if (network_agent && get_oss_config_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_oss_config country=" << country_code;
         ret = get_oss_config_ptr(network_agent, config, country_code, http_code, http_error);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_oss_config ret=" << ret << " http_code=" << http_code << " config_len=" << config.size();
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
@@ -1859,7 +2109,10 @@ int NetworkAgent::put_rating_picture_oss(std::string &config, std::string &pic_o
 {
     int ret = 0;
     if (network_agent && put_rating_picture_oss_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] put_rating_picture_oss model_id=" << model_id << " profile_id=" << profile_id
+            << " config_len=" << config.size();
         ret = put_rating_picture_oss_ptr(network_agent, config, pic_oss_path, model_id, profile_id, http_code, http_error);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] put_rating_picture_oss ret=" << ret << " http_code=" << http_code;
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
@@ -1869,7 +2122,10 @@ int NetworkAgent::get_model_mall_rating_result(int job_id, std::string &rating_r
 {
     int ret = 0;
     if (network_agent && get_model_mall_rating_result_ptr) {
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_mall_rating_result job_id=" << job_id;
         ret = get_model_mall_rating_result_ptr(network_agent, job_id, rating_result, http_code, http_error);
+        BOOST_LOG_TRIVIAL(info) << "[cloud_plugin] get_model_mall_rating_result ret=" << ret
+            << " http_code=" << http_code << " result_len=" << rating_result.size();
         if (ret) BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(" error: network_agent=%1%, ret=%2%") % network_agent % ret;
     }
     return ret;
