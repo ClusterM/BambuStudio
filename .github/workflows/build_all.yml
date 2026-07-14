@@ -55,7 +55,7 @@ jobs:
             arch: arm64
           - os: ubuntu-26.04-arm
             arch: arm64
-          - os: windows-2022
+          - os: windows-latest
           - os: macos-15-intel
             arch: x86_64
           - os: macos-15
