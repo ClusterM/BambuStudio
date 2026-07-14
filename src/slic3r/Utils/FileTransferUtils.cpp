@@ -8,6 +8,9 @@ namespace Slic3r {
 
 FileTransferModule::FileTransferModule(ModuleHandle networking_module, int required_abi_version) : networking_(networking_module)
 {
+    BOOST_LOG_TRIVIAL(info) << "FileTransferModule: initializing FT interface from networking_module="
+        << networking_module << ", required_abi_version=" << required_abi_version;
+
     // basic
     ft_abi_version        = sym_lookup<fn_ft_abi_version>(networking_, "ft_abi_version");
     ft_free               = sym_lookup<fn_ft_free>(networking_, "ft_free");
@@ -35,6 +38,53 @@ FileTransferModule::FileTransferModule(ModuleHandle networking_module, int requi
     ft_job_set_msg_cb  = sym_lookup<fn_ft_job_set_msg_cb>(networking_, "ft_job_set_msg_cb");
     ft_job_try_get_msg = sym_lookup<fn_ft_job_try_get_msg>(networking_, "ft_job_try_get_msg");
     ft_job_get_msg     = sym_lookup<fn_ft_job_get_msg>(networking_, "ft_job_get_msg");
+
+    // ABI version check
+    if (ft_abi_version) {
+        int actual_abi = ft_abi_version();
+        if (actual_abi < required_abi_version) {
+            BOOST_LOG_TRIVIAL(warning) << "FileTransferModule: ABI version mismatch - plugin reports "
+                << actual_abi << ", required >= " << required_abi_version
+                << " - file transfer operations may fail";
+        } else {
+            BOOST_LOG_TRIVIAL(info) << "FileTransferModule: ABI version ok (plugin=" << actual_abi
+                << ", required=" << required_abi_version << ")";
+        }
+    } else {
+        BOOST_LOG_TRIVIAL(warning) << "FileTransferModule: ft_abi_version symbol not found"
+            << " - cannot verify ABI compatibility, required=" << required_abi_version;
+    }
+
+    // count resolved symbols for a summary
+    const int total_symbols = 20;
+    int missing = 0;
+    if (!ft_free)               ++missing;
+    if (!ft_job_result_destroy) ++missing;
+    if (!ft_job_msg_destroy)    ++missing;
+    if (!ft_tunnel_create)      ++missing;
+    if (!ft_tunnel_retain)      ++missing;
+    if (!ft_tunnel_release)     ++missing;
+    if (!ft_tunnel_start_connect) ++missing;
+    if (!ft_tunnel_sync_connect)  ++missing;
+    if (!ft_tunnel_set_status_cb) ++missing;
+    if (!ft_tunnel_shutdown)    ++missing;
+    if (!ft_job_create)         ++missing;
+    if (!ft_job_retain)         ++missing;
+    if (!ft_job_release)        ++missing;
+    if (!ft_job_set_result_cb)  ++missing;
+    if (!ft_job_get_result)     ++missing;
+    if (!ft_tunnel_start_job)   ++missing;
+    if (!ft_job_cancel)         ++missing;
+    if (!ft_job_set_msg_cb)     ++missing;
+    if (!ft_job_try_get_msg)    ++missing;
+    if (!ft_job_get_msg)        ++missing;
+
+    if (missing == 0) {
+        BOOST_LOG_TRIVIAL(info) << "FileTransferModule: all " << total_symbols << " symbols resolved successfully";
+    } else {
+        BOOST_LOG_TRIVIAL(warning) << "FileTransferModule: " << missing << "/" << total_symbols
+            << " symbols missing - file transfer will be partially or fully unavailable";
+    }
 }
 
 FileTransferTunnel::FileTransferTunnel(FileTransferModule &m, const std::string &url) : m_(&m)
