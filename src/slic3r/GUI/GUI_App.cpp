@@ -2495,7 +2495,8 @@ static LogEncOptions s_get_log_enc_opts()
 {
     LogEncOptions enc_options;
 
-#if BBL_RELEASE_TO_PUBLIC
+//#if BBL_RELEASE_TO_PUBLIC
+#if 0 // Disable log encryption
     std::string region_str;
     if (wxGetApp().app_config && !wxGetApp().app_config->get("region").empty()) {
         region_str = wxGetApp().app_config->get("region");
@@ -2611,11 +2612,11 @@ void GUI_App::init_app_config()
     const auto& enc_opts = s_get_log_enc_opts();
     const auto& log_filename = LogSinkUtil::get_log_filaname_format(enc_opts);
 
-#if !BBL_RELEASE_TO_PUBLIC  && defined(__WINDOWS__)
+// #if !BBL_RELEASE_TO_PUBLIC  && defined(__WINDOWS__)
     set_log_path_and_level(log_filename, 5, enc_opts);
-#else
-    set_log_path_and_level(log_filename, 3, enc_opts);
-#endif
+// #else
+//     set_log_path_and_level(log_filename, 3, enc_opts);
+// #endif
 
     //BBS: remove GCodeViewer as seperate APP logic
 	if (!app_config)
