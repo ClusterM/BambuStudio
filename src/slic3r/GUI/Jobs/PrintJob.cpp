@@ -489,6 +489,25 @@ void PrintJob::process()
         &error_desc_for_code,
         &remember_cloud_error
     ](int stage, int code, std::string info) {
+                        {
+                            // Log every plugin status callback so OBN vs stock can be compared.
+                            static const char* stage_names[] = {
+                                "Create", "Upload", "Waiting", "Sending",
+                                "Record", "WaitPrinter", "Finished", "ERROR", "Limit"
+                            };
+                            const char* stage_name =
+                                (stage >= 0 && stage <= (int)BBL::SendingPrintJobStage::PrintingStageLimit)
+                                    ? stage_names[stage] : "?";
+                            BOOST_LOG_TRIVIAL(info)
+                                << "print_job: update_fn stage=" << stage
+                                << " (" << stage_name << ")"
+                                << " code=" << code
+                                << " info='" << info << "'"
+                                << " connection_type=" << this->connection_type
+                                << " try_lan=" << (is_try_lan_mode ? "1" : "0")
+                                << " try_lan_failed=" << (is_try_lan_mode_failed ? "1" : "0");
+                        }
+
                         wxString msg = get_route_status_msg();
                         m_print_stage = stage;
                         if (stage == BBL::SendingPrintJobStage::PrintingStageCreate) {
