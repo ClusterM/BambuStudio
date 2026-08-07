@@ -836,6 +836,9 @@ public:
     // check whether nozzle staus is synced with printer, extruder = -1 means check both extruder
     bool is_extruder_stat_synced(int extruder_id = -1);
     void update_machine_sync_status();
+    // Turn off arc fitting when the connected printer does the curve planning itself.
+    // Returns true when the option has just been switched off.
+    bool apply_printer_arc_fitting_capability(bool allow_jump_to_option);
     void update_filament_volume_map(int extruder_id, int volume_type);
 
     void show_wrapping_detect_dialog_if_necessary();

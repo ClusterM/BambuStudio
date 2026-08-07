@@ -2121,17 +2121,7 @@ bool Sidebar::priv::sync_extruder_list(bool &only_external_material, bool is_man
         }
     }
 
-    if (obj->is_support_active_arc_fitting) {
-        auto tab = wxGetApp().get_tab(Preset::TYPE_PRINT);
-        if (tab->disable_arc_fitting()) {
-            wxGetApp().sidebar().jump_to_option("enable_arc_fitting", Preset::TYPE_PRINT, L"");
-            auto notification_manager = plater->get_notification_manager();
-            auto msg                  = into_u8(_L("Tips:\nCurve planning enhancement support detected on your printer. The software has automatically disabled arc fitting to ensure this feature functions correctly."));
-            notification_manager->push_notification(NotificationType::BBLArcFittingInfo, NotificationManager::NotificationLevel::WarningNotificationLevel, msg);
-        }
-    } else {
-        plater->get_notification_manager()->remove_notification_of_type(NotificationType::BBLArcFittingInfo);
-    }
+    plater->apply_printer_arc_fitting_capability(true);
 
     // enable dynamic filament if supported
     auto& project_config   = wxGetApp().preset_bundle->project_config;
@@ -26762,6 +26752,45 @@ void Plater::update_machine_sync_status()
     }
     MachineObject *obj = wxGetApp().getDeviceManager()->get_selected_machine();
     GUI::wxGetApp().sidebar().update_sync_status(obj);
+
+    // Every status push carries the capability flags, so the option is kept off no matter
+    // how the printer got connected or whether the user ever ran an explicit sync.
+    apply_printer_arc_fitting_capability(false);
+}
+
+bool Plater::apply_printer_arc_fitting_capability(bool allow_jump_to_option)
+{
+    NotificationManager *notification_manager = get_notification_manager();
+    if (!notification_manager)
+        return false;
+
+    DeviceManager *dev = wxGetApp().getDeviceManager();
+    MachineObject *obj = dev ? dev->get_selected_machine() : nullptr;
+
+    // The capability only applies when the selected preset describes the connected printer,
+    // otherwise the g-code is not sliced for that machine at all.
+    bool printer_plans_curves = false;
+    if (obj && obj->is_support_active_arc_fitting) {
+        PresetBundle *preset_bundle = wxGetApp().preset_bundle;
+        if (preset_bundle)
+            printer_plans_curves = obj->get_show_printer_type() == preset_bundle->printers.get_selected_preset().get_printer_type(preset_bundle);
+    }
+
+    if (!printer_plans_curves) {
+        notification_manager->remove_notification_of_type(NotificationType::BBLArcFittingInfo);
+        return false;
+    }
+
+    Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINT);
+    if (!tab || !tab->disable_arc_fitting())
+        return false;
+
+    if (allow_jump_to_option)
+        wxGetApp().sidebar().jump_to_option("enable_arc_fitting", Preset::TYPE_PRINT, L"");
+
+    auto msg = into_u8(_L("Tips:\nCurve planning enhancement support detected on your printer. The software has automatically disabled arc fitting to ensure this feature functions correctly."));
+    notification_manager->push_notification(NotificationType::BBLArcFittingInfo, NotificationManager::NotificationLevel::WarningNotificationLevel, msg);
+    return true;
 }
 
 void Plater::update_filament_volume_map(int extruder_id, int volume_type)
