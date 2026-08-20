@@ -11314,12 +11314,19 @@ bool Plater::priv::replace_volume_with_stl(int object_idx, int volume_idx, const
             model_object->ensure_on_bed();
         }
     }
-    catch (std::exception&) {
+    catch (std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " failed to load replacement file '" << path
+                                 << "': " << e.what();
         // error while loading
         return false;
     }
 
     if (new_model.objects.size() > 1 || new_model.objects.front()->volumes.size() > 1) {
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " Unable to replace: file has multiple objects/volumes"
+                                 << " path='" << path << "'"
+                                 << " objects=" << new_model.objects.size()
+                                 << " first_object_volumes="
+                                 << (new_model.objects.empty() ? 0 : new_model.objects.front()->volumes.size());
         MessageDialog dlg(q, _L("Unable to replace with more than one volume"), _L("Error during replace"), wxOK | wxOK_DEFAULT | wxICON_WARNING);
         dlg.ShowModal();
         return false;
@@ -11428,6 +11435,8 @@ static std::vector<std::pair<int, int>> reloadable_volumes(const Model &model, c
 {
     std::vector<std::pair<int, int>> ret;
     const std::set<unsigned int> &   selected_volumes_idxs = selection.get_volume_idxs();
+    BOOST_LOG_TRIVIAL(info) << "reloadable_volumes: selected GLVolumes=" << selected_volumes_idxs.size()
+                            << " model.objects=" << model.objects.size();
     for (unsigned int idx : selected_volumes_idxs) {
         const GLVolume &v     = *selection.get_volume(idx);
         const int       o_idx = v.object_idx();
@@ -11436,12 +11445,52 @@ static std::vector<std::pair<int, int>> reloadable_volumes(const Model &model, c
             const int          v_idx = v.volume_idx();
             if (0 <= v_idx && v_idx < int(obj->volumes.size())) {
                 const ModelVolume *vol = obj->volumes[v_idx];
-                if (!vol->source.is_from_builtin_objects && !vol->source.input_file.empty() && !fs::path(vol->source.input_file).extension().string().empty())
+                const std::string  ext = fs::path(vol->source.input_file).extension().string();
+                const bool         reloadable = !vol->source.is_from_builtin_objects && !vol->source.input_file.empty() && !ext.empty();
+                BOOST_LOG_TRIVIAL(info) << "reloadable_volumes: sel_idx=" << idx
+                                        << " obj=" << o_idx << " vol=" << v_idx
+                                        << " vol_name='" << vol->name << "'"
+                                        << " obj_name='" << obj->name << "'"
+                                        << " source.input_file='" << vol->source.input_file << "'"
+                                        << " source.object_idx=" << vol->source.object_idx
+                                        << " source.volume_idx=" << vol->source.volume_idx
+                                        << " object.input_file='" << obj->input_file << "'"
+                                        << " builtin=" << vol->source.is_from_builtin_objects
+                                        << " ext='" << ext << "'"
+                                        << " reloadable=" << reloadable;
+                if (reloadable)
                     ret.push_back({o_idx, v_idx});
+            } else {
+                BOOST_LOG_TRIVIAL(warning) << "reloadable_volumes: skip sel_idx=" << idx
+                                           << " volume_idx=" << v_idx
+                                           << " out of range, object volumes=" << obj->volumes.size();
             }
+        } else {
+            BOOST_LOG_TRIVIAL(warning) << "reloadable_volumes: skip sel_idx=" << idx
+                                       << " object_idx=" << o_idx
+                                       << " out of range, model.objects=" << model.objects.size();
         }
     }
     return ret;
+}
+
+static void log_reload_model_snapshot(const char *tag, const std::string &path, const Model &m)
+{
+    BOOST_LOG_TRIVIAL(info) << "reload_from_disk: " << tag << " path='" << path << "' objects=" << m.objects.size();
+    for (size_t o = 0; o < m.objects.size(); ++o) {
+        const ModelObject *obj = m.objects[o];
+        BOOST_LOG_TRIVIAL(info) << "reload_from_disk:   obj[" << o << "] name='" << obj->name
+                                << "' input_file='" << obj->input_file
+                                << "' volumes=" << obj->volumes.size();
+        for (size_t v = 0; v < obj->volumes.size(); ++v) {
+            const ModelVolume *vol = obj->volumes[v];
+            BOOST_LOG_TRIVIAL(info) << "reload_from_disk:     vol[" << v << "] name='" << vol->name
+                                    << "' source.input_file='" << vol->source.input_file
+                                    << "' source.object_idx=" << vol->source.object_idx
+                                    << " source.volume_idx=" << vol->source.volume_idx
+                                    << " builtin=" << vol->source.is_from_builtin_objects;
+        }
+    }
 }
 #endif // ENABLE_RELOAD_FROM_DISK_REWORK
 
@@ -11452,8 +11501,10 @@ void Plater::priv::reload_from_disk()
     std::vector<std::pair<int, int>> selected_volumes = reloadable_volumes(model, get_selection());
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " entry, and reloadable volumes number is: " << selected_volumes.size();
     // nothing to reload, return
-    if (selected_volumes.empty())
+    if (selected_volumes.empty()) {
+        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " nothing to reload: no reloadable volumes in selection";
         return;
+    }
 
     std::sort(selected_volumes.begin(), selected_volumes.end(), [](const std::pair<int, int> &v1, const std::pair<int, int> &v2) {
         return (v1.first < v2.first) || (v1.first == v2.first && v1.second < v2.second);
@@ -11504,9 +11555,12 @@ void Plater::priv::reload_from_disk()
     for (auto [obj_idx, vol_idx] : selected_volumes) {
         const ModelObject *object = model.objects[obj_idx];
         const ModelVolume *volume = object->volumes[vol_idx];
-        if (fs::exists(volume->source.input_file))
+        if (fs::exists(volume->source.input_file)) {
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " source file exists: obj=" << obj_idx
+                                    << " vol=" << vol_idx
+                                    << " path='" << volume->source.input_file << "'";
             input_paths.push_back(volume->source.input_file);
-        else {
+        } else {
             // searches the source in the same folder containing the object
             bool found = false;
             if (!object->input_file.empty()) {
@@ -11514,13 +11568,22 @@ void Plater::priv::reload_from_disk()
                 if (!object_path.empty()) {
                     object_path /= fs::path(volume->source.input_file).filename();
                     if (fs::exists(object_path)) {
+                        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " source missing, found next to object: obj=" << obj_idx
+                                                << " vol=" << vol_idx
+                                                << " original='" << volume->source.input_file
+                                                << "' resolved='" << object_path.string() << "'";
                         input_paths.push_back(object_path);
                         found = true;
                     }
                 }
             }
-            if (!found)
+            if (!found) {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " source file missing: obj=" << obj_idx
+                                           << " vol=" << vol_idx
+                                           << " source.input_file='" << volume->source.input_file
+                                           << "' object.input_file='" << object->input_file << "'";
                 missing_input_paths.push_back(volume->source.input_file);
+            }
         }
     }
 #else
@@ -11571,8 +11634,11 @@ void Plater::priv::reload_from_disk()
         const wxString start_dir = search.has_parent_path() ? from_u8(search.parent_path().string())
                                                             : from_u8(wxGetApp().app_config->get_last_dir());
         wxFileDialog dialog(q, title, start_dir, from_u8(search.filename().string()), file_wildcards(FT_MODEL), wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-        if (dialog.ShowModal() != wxID_OK)
+        if (dialog.ShowModal() != wxID_OK) {
+            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " user cancelled missing-file dialog for '"
+                                       << search.string() << "'";
             return;
+        }
 
         std::string sel_filename_path = dialog.GetPath().ToUTF8().data();
         std::string sel_filename = fs::path(sel_filename_path).filename().string();
@@ -11598,12 +11664,18 @@ void Plater::priv::reload_from_disk()
         else {
             wxString      message = _L("Do you want to replace it") + " ?";
             MessageDialog dlg(q, message, _L("Message"), wxYES_NO | wxYES_DEFAULT | wxICON_QUESTION);
-            if (dlg.ShowModal() == wxID_YES)
+            if (dlg.ShowModal() == wxID_YES) {
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " user replaced missing file '"
+                                        << search.string() << "' with '" << sel_filename_path << "'";
 #if ENABLE_RELOAD_FROM_DISK_REWORK
                 replace_paths.emplace_back(search, sel_filename_path);
 #else
                 replace_paths.emplace_back(sel_filename_path);
 #endif // ENABLE_RELOAD_FROM_DISK_REWORK
+            } else {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " user declined replace for missing file '"
+                                           << search.string() << "' (selected '" << sel_filename_path << "')";
+            }
             missing_input_paths.pop_back();
         }
     }
@@ -11613,6 +11685,19 @@ void Plater::priv::reload_from_disk()
 
     std::sort(replace_paths.begin(), replace_paths.end());
     replace_paths.erase(std::unique(replace_paths.begin(), replace_paths.end()), replace_paths.end());
+
+    BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " files to load=" << input_paths.size()
+                            << " files to replace=" << replace_paths.size();
+    for (const auto &p : input_paths)
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "   input_path='" << p.string() << "'";
+    for (const auto &p : replace_paths) {
+#if ENABLE_RELOAD_FROM_DISK_REWORK
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "   replace_path src='" << p.first.string()
+                                << "' dest='" << p.second.string() << "'";
+#else
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "   replace_path='" << p.string() << "'";
+#endif
+    }
 
 #if ENABLE_RELOAD_FROM_DISK_REWORK
     Plater::TakeSnapshot snapshot(q, "Reload from disk");
@@ -11676,13 +11761,18 @@ void Plater::priv::reload_from_disk()
                 sidebar->obj_list()->reload_all_plates();
             }
         }
-        catch (std::exception&)
+        catch (std::exception& e)
         {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " failed to load file '" << path
+                                     << "': " << e.what()
+                                     << " (new_model.objects=" << new_model.objects.size() << ")";
             // error while loading
             return;
         }
 
 #if ENABLE_RELOAD_FROM_DISK_REWORK
+        log_reload_model_snapshot("loaded file", path, new_model);
+
         for (auto [obj_idx, vol_idx] : selected_volumes) {
             ModelObject *old_model_object = model.objects[obj_idx];
             ModelVolume *old_volume       = old_model_object->volumes[vol_idx];
@@ -11692,6 +11782,14 @@ void Plater::priv::reload_from_disk()
             bool has_source = !old_volume->source.input_file.empty() &&
                               boost::algorithm::iequals(fs::path(old_volume->source.input_file).filename().string(), fs::path(path).filename().string());
             bool has_name = !old_volume->name.empty() && boost::algorithm::iequals(old_volume->name, fs::path(path).filename().string());
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " match attempt: path='" << path
+                                    << "' obj=" << obj_idx << " vol=" << vol_idx
+                                    << " vol_name='" << old_volume->name << "'"
+                                    << " source.input_file='" << old_volume->source.input_file << "'"
+                                    << " source.object_idx=" << old_volume->source.object_idx
+                                    << " source.volume_idx=" << old_volume->source.volume_idx
+                                    << " has_source=" << has_source
+                                    << " has_name=" << has_name;
             if (has_source || has_name) {
                 int  new_volume_idx = -1;
                 int  new_object_idx = -1;
@@ -11700,12 +11798,30 @@ void Plater::priv::reload_from_disk()
                 if (has_source && old_volume->source.object_idx < int(new_model.objects.size())) {
                     const ModelObject *obj = new_model.objects[old_volume->source.object_idx];
                     if (old_volume->source.volume_idx < int(obj->volumes.size())) {
-                        if (obj->volumes[old_volume->source.volume_idx]->source.input_file == old_volume->source.input_file) {
+                        const std::string &loaded_src = obj->volumes[old_volume->source.volume_idx]->source.input_file;
+                        if (loaded_src == old_volume->source.input_file) {
                             new_volume_idx = old_volume->source.volume_idx;
                             new_object_idx = old_volume->source.object_idx;
                             match_found    = true;
+                            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " source index match: new_obj="
+                                                    << new_object_idx << " new_vol=" << new_volume_idx;
+                        } else {
+                            BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " source path mismatch at stored indices"
+                                                       << " source.object_idx=" << old_volume->source.object_idx
+                                                       << " source.volume_idx=" << old_volume->source.volume_idx
+                                                       << " stored='" << old_volume->source.input_file
+                                                       << "' loaded='" << loaded_src << "'";
                         }
+                    } else {
+                        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " source.volume_idx="
+                                                   << old_volume->source.volume_idx
+                                                   << " out of range, loaded volumes=" << obj->volumes.size()
+                                                   << " at object_idx=" << old_volume->source.object_idx;
                     }
+                } else if (has_source) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " source.object_idx="
+                                               << old_volume->source.object_idx
+                                               << " out of range, loaded objects=" << new_model.objects.size();
                 }
 
                 if (!match_found && has_name) {
@@ -11728,14 +11844,42 @@ void Plater::priv::reload_from_disk()
                             break;
                         }
                     }
+                    if (new_object_idx >= 0)
+                        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " name match: new_obj=" << new_object_idx
+                                                << " new_vol=" << new_volume_idx
+                                                << " name='" << old_volume->name << "'";
+                    else
+                        BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " name match failed: vol_name='"
+                                                   << old_volume->name << "' not found in loaded model";
+                } else if (!match_found) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " no name fallback: has_name=0 vol_name='"
+                                               << old_volume->name << "' path_filename='"
+                                               << fs::path(path).filename().string() << "'";
                 }
 
                 if (new_object_idx < 0 || int(new_model.objects.size()) <= new_object_idx) {
+                    BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " Unable to reload: no matching object"
+                                             << " path='" << path << "'"
+                                             << " vol_name='" << old_volume->name << "'"
+                                             << " source.input_file='" << old_volume->source.input_file << "'"
+                                             << " has_source=" << has_source
+                                             << " has_name=" << has_name
+                                             << " match_found=" << match_found
+                                             << " new_object_idx=" << new_object_idx
+                                             << " new_volume_idx=" << new_volume_idx
+                                             << " loaded_objects=" << new_model.objects.size();
                     fail_list.push_back(from_u8(has_source ? old_volume->source.input_file : old_volume->name));
                     continue;
                 }
                 ModelObject *new_model_object = new_model.objects[new_object_idx];
                 if (int(new_model_object->volumes.size()) <= new_volume_idx) {
+                    BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " Unable to reload: volume index out of range"
+                                             << " path='" << path << "'"
+                                             << " vol_name='" << old_volume->name << "'"
+                                             << " new_object_idx=" << new_object_idx
+                                             << " new_volume_idx=" << new_volume_idx
+                                             << " loaded_volumes=" << new_model_object->volumes.size()
+                                             << " new_obj_name='" << new_model_object->name << "'";
                     fail_list.push_back(from_u8(has_source ? old_volume->source.input_file : old_volume->name));
                     continue;
                 }
@@ -11776,6 +11920,18 @@ void Plater::priv::reload_from_disk()
 
                 // Fix warning icon in object list
                 wxGetApp().obj_list()->update_item_error_icon(obj_idx, vol_idx);
+                BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " reloaded volume ok: obj=" << obj_idx
+                                        << " vol=" << vol_idx
+                                        << " from new_obj=" << new_object_idx
+                                        << " new_vol=" << new_volume_idx
+                                        << " path='" << path << "'";
+            } else {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " skip volume: neither source filename nor volume name matches"
+                                           << " path='" << path << "'"
+                                           << " path_filename='" << fs::path(path).filename().string() << "'"
+                                           << " source.input_file='" << old_volume->source.input_file << "'"
+                                           << " vol_name='" << old_volume->name << "'"
+                                           << " obj=" << obj_idx << " vol=" << vol_idx;
             }
         }
 #else
@@ -11853,10 +12009,18 @@ void Plater::priv::reload_from_disk()
 
 #if ENABLE_RELOAD_FROM_DISK_REWORK
     for (auto [src, dest] : replace_paths) {
+        BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " replace_path src='" << src.string()
+                                << "' dest='" << dest.string() << "'";
         for (auto [obj_idx, vol_idx] : selected_volumes) {
-            if (boost::algorithm::iequals(model.objects[obj_idx]->volumes[vol_idx]->source.input_file, src.string()))
+            if (boost::algorithm::iequals(model.objects[obj_idx]->volumes[vol_idx]->source.input_file, src.string())) {
                 // When an error occurs, either the dest parsing error occurs, or the number of objects in the dest is greater than 1 and cannot be replaced, and cannot be replaced in this loop.
-                if (!replace_volume_with_stl(obj_idx, vol_idx, dest, "")) break;
+                if (!replace_volume_with_stl(obj_idx, vol_idx, dest, "")) {
+                    BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " Unable to reload: replace_volume_with_stl failed"
+                                             << " obj=" << obj_idx << " vol=" << vol_idx
+                                             << " src='" << src.string() << "' dest='" << dest.string() << "'";
+                    break;
+                }
+            }
         }
     }
 #else
@@ -11877,7 +12041,11 @@ void Plater::priv::reload_from_disk()
         wxString message = _L("Unable to reload:") + "\n";
         for (const wxString& s : fail_list) {
             message += s + "\n";
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " Unable to reload item: " << s.ToUTF8().data();
         }
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << " Unable to reload: " << fail_list.size()
+                                 << " item(s) failed, input_paths=" << input_paths.size()
+                                 << " replace_paths=" << replace_paths.size();
         MessageDialog dlg(q, message, _L("Error during reload"), wxOK | wxOK_DEFAULT | wxICON_WARNING);
         dlg.ShowModal();
     }
