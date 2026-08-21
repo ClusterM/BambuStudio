@@ -11474,6 +11474,13 @@ static std::vector<std::pair<int, int>> reloadable_volumes(const Model &model, c
     return ret;
 }
 
+static bool source_filenames_equal(const std::string &lhs, const std::string &rhs)
+{
+    if (lhs.empty() || rhs.empty())
+        return false;
+    return boost::algorithm::iequals(fs::path(lhs).filename().string(), fs::path(rhs).filename().string());
+}
+
 static void log_reload_model_snapshot(const char *tag, const std::string &path, const Model &m)
 {
     BOOST_LOG_TRIVIAL(info) << "reload_from_disk: " << tag << " path='" << path << "' objects=" << m.objects.size();
@@ -11799,7 +11806,7 @@ void Plater::priv::reload_from_disk()
                     const ModelObject *obj = new_model.objects[old_volume->source.object_idx];
                     if (old_volume->source.volume_idx < int(obj->volumes.size())) {
                         const std::string &loaded_src = obj->volumes[old_volume->source.volume_idx]->source.input_file;
-                        if (loaded_src == old_volume->source.input_file) {
+                        if (source_filenames_equal(loaded_src, old_volume->source.input_file)) {
                             new_volume_idx = old_volume->source.volume_idx;
                             new_object_idx = old_volume->source.object_idx;
                             match_found    = true;
@@ -11824,7 +11831,9 @@ void Plater::priv::reload_from_disk()
                                                << " out of range, loaded objects=" << new_model.objects.size();
                 }
 
-                if (!match_found && has_name) {
+                // Search the loaded model by part name. Do not require the volume
+                // name to equal the source filename (Roller != tpu_tube-Roller.3mf).
+                if (!match_found && !old_volume->name.empty()) {
                     // take idxs from the 1st matching volume
                     for (size_t o = 0; o < new_model.objects.size(); ++o) {
                         ModelObject *obj   = new_model.objects[o];
@@ -11851,10 +11860,6 @@ void Plater::priv::reload_from_disk()
                     else
                         BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " name match failed: vol_name='"
                                                    << old_volume->name << "' not found in loaded model";
-                } else if (!match_found) {
-                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << " no name fallback: has_name=0 vol_name='"
-                                               << old_volume->name << "' path_filename='"
-                                               << fs::path(path).filename().string() << "'";
                 }
 
                 if (new_object_idx < 0 || int(new_model.objects.size()) <= new_object_idx) {
