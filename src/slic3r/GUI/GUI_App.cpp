@@ -131,6 +131,7 @@
 #include "HintNotification.hpp"
 #include "BBLUtil.hpp"
 #include "fila_manager/wgtFilaManagerFeature.h"
+#include "fila_manager/AmsSpoolOverlay.h"
 
 //#ifdef WIN32
 //#include "BaseException.h"
@@ -2295,6 +2296,8 @@ void GUI_App::init_networking_callbacks()
                     auto sel = this->m_device_manager->get_selected_machine();
                     if (sel && sel->get_dev_id() == dev_id) {
                         obj->parse_json("cloud", msg);
+                        if (auto* overlay = wxGetApp().ams_spool_overlay())
+                            overlay->on_device_update(obj);
                         GUI::wxGetApp().sidebar().load_ams_list(obj);
                         // STUDIO-18155: AMS 状态变化驱动耗材同步（本地 store + 节流后云端）
                         // 仅在在位字段实际变化时才推 spool list，避免每条 MQTT 都整体重渲。
@@ -2354,6 +2357,8 @@ void GUI_App::init_networking_callbacks()
                 if (MachineObject* obj = m_device_manager->get_my_machine(dev_id)) {
                     obj->parse_json("lan", msg);
                     if (this->m_device_manager->get_selected_machine() == obj) {
+                        if (auto* overlay = wxGetApp().ams_spool_overlay())
+                            overlay->on_device_update(obj);
                         GUI::wxGetApp().sidebar().load_ams_list(obj);
                         // STUDIO-18155: AMS 状态变化驱动耗材同步（本地 store + 节流后云端）
                         // 仅在在位字段实际变化时才推 spool list，避免每条 MQTT 都整体重渲。
@@ -2875,6 +2880,11 @@ int GUI_App::OnExit()
     Slic3r::HelioQuery::shutdown_background_requests();
 
     stop_sync_user_preset();
+
+    if (m_ams_spool_overlay) {
+        delete m_ams_spool_overlay;
+        m_ams_spool_overlay = nullptr;
+    }
 
     if (m_fila_manager_cloud_disp) {
         delete m_fila_manager_cloud_disp;
@@ -3537,6 +3547,13 @@ bool GUI_App::on_init_inner()
             m_fila_manager_cloud_disp = new wgtFilaManagerCloudDispatcher(m_fila_manager_cloud_sync,
                                                                          m_fila_manager_cloud_client);
             BOOST_LOG_TRIVIAL(info) << "Filament Manager cloud dispatcher initialized";
+        }
+        if (!m_ams_spool_overlay) {
+            m_ams_spool_overlay = new AmsSpoolOverlay(m_fila_manager_store);
+            BOOST_LOG_TRIVIAL(info) << "Filament Manager Spoolman/HA overlay initialized";
+        }
+        if (is_spoolman_enabled() && m_fila_manager_cloud_disp) {
+            m_fila_manager_cloud_disp->enqueue_pull();
         }
     }
 

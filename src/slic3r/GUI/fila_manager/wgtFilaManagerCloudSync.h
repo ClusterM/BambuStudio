@@ -94,6 +94,9 @@ public:
     static FilamentSpool cloud_json_to_spool(const nlohmann::json& j);
 
 private:
+    void apply_pulled_spools(const std::vector<FilamentSpool>& list);
+    void pull_from_spoolman();
+
     wgtFilaManagerStore*       m_store;
     wgtFilaManagerCloudClient* m_client;
     bool                       m_syncing = false;

@@ -17,6 +17,7 @@
 #include "slic3r/GUI/EncodedFilament.hpp"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerColorType.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerStore.h"
+#include "slic3r/GUI/fila_manager/wgtFilaManagerFeature.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerCloudClient.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerCloudSync.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerCloudDispatcher.h"
@@ -47,6 +48,8 @@ bool is_spool_cloud_write_action(const std::string& action)
 
 bool can_write_spool_to_cloud(NetworkAgent* agent)
 {
+    if (is_spoolman_enabled())
+        return false;
     return agent && agent->is_user_login() && agent->is_server_connected();
 }
 
@@ -800,7 +803,7 @@ nlohmann::json FilamentManagerVM::build_spool_list()
 {
     auto* store = wxGetApp().fila_manager_store();
     auto* agent = wxGetApp().getAgent();
-    if (!agent || !agent->is_user_login())
+    if (!is_spoolman_enabled() && (!agent || !agent->is_user_login()))
         return nlohmann::json::array();
     nlohmann::json spools = store ? store->spools_to_json() : nlohmann::json::array();
     if (!spools.is_array()) return spools;

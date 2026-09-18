@@ -139,8 +139,8 @@ export function DetailDialog({ open, spool, filteredSpools, onClose, onEdit, onN
           <div className="flex flex-col">
             <div className="flex items-center gap-1 text-sm font-medium text-fm-text-strong leading-[22px] [&>svg]:text-fm-text-secondary [&>svg]:shrink-0">
               {nameParts || '—'}
-              <span className="inline-flex items-center justify-center px-1 h-4 rounded-sm bg-fm-input text-[11px] text-fm-text-secondary leading-4 empty:hidden">
-                {spool.tag_uid && /[^0]/.test(spool.tag_uid) ? t('RFID') : ''}
+              <span className="inline-flex items-center justify-center px-1 h-4 rounded-sm bg-fm-input text-[11px] text-fm-text-secondary leading-4 empty:hidden font-mono">
+                {spool.spool_id ? `ID ${spool.spool_id}` : (spool.tag_uid && /[^0]/.test(spool.tag_uid) ? t('RFID') : '')}
               </span>
             </div>
             <div className="text-xs text-fm-text-secondary opacity-70 leading-[19px]">
@@ -211,10 +211,16 @@ export function DetailDialog({ open, spool, filteredSpools, onClose, onEdit, onN
 
               {/* 基础信息 — figma 参数1: 显示 preset 组合名 */}
               <div className="fm-section-bar flex items-center gap-[6px] text-sm font-normal text-fm-text-primary mt-4 mb-2 leading-[22px]">{t('Basic Info')}</div>
-              <DetField
-                label={t('Parameter') + ' 1'}
-                value={formatSpoolDisplayName(spool) || '—'}
-              />
+              <div className="flex gap-3">
+                <DetField
+                  label={t('Spool ID')}
+                  value={spool.spool_id || '—'}
+                />
+                <DetField
+                  label={t('Parameter') + ' 1'}
+                  value={formatSpoolDisplayName(spool) || '—'}
+                />
+              </div>
 
               {/* 备注（云端唯一支持的扩展字段） */}
           <div className="fm-section-bar flex items-center gap-[6px] text-sm font-normal text-fm-text-primary mt-4 mb-2 leading-[22px]">{t('Note')}</div>

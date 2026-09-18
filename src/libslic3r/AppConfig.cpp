@@ -427,6 +427,25 @@ void AppConfig::set_defaults()
         set("helio_api_other", "https://api.helioadditive.com/graphql");
     }
 
+    // Spoolman / Home Assistant: optional local inventory instead of Bambu cloud.
+    // Credentials for Spoolman go inside the URL (https://user:password@host/api/v1).
+    if (get("spoolman_url").empty())
+        set("spoolman_url", "");
+    if (get("ha_url").empty())
+        set("ha_url", "");
+    if (get("ha_token").empty())
+        set("ha_token", "");
+    if (get("ha_ams_tray_1").empty())
+        set("ha_ams_tray_1", "input_number.ams_tray_1_spool_id");
+    if (get("ha_ams_tray_2").empty())
+        set("ha_ams_tray_2", "input_number.ams_tray_2_spool_id");
+    if (get("ha_ams_tray_3").empty())
+        set("ha_ams_tray_3", "input_number.ams_tray_3_spool_id");
+    if (get("ha_ams_tray_4").empty())
+        set("ha_ams_tray_4", "input_number.ams_tray_4_spool_id");
+    if (get("ha_external_spool").empty())
+        set("ha_external_spool", "input_number.external_spool_id");
+
     if (get("max_recent_count").empty()) {
         set("max_recent_count", "18");
     }

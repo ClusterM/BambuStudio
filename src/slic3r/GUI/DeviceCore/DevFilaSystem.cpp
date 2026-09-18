@@ -69,6 +69,7 @@ void DevAmsTray::reset()
     k                   = 0.0f;
     n                   = 0.0f;
     is_bbl              = false;
+    spoolman_overlay    = false;
     hold_count          = 0;
     remain              = 0;
     remain_g            = -1;
