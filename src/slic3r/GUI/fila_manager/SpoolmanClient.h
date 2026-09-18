@@ -21,6 +21,9 @@ struct SpoolmanEndpoint {
 SpoolmanEndpoint parse_spoolman_url(const std::string& raw_url);
 FilamentSpool    spool_from_spoolman_json(const nlohmann::json& j);
 int              remain_percent_from_weights(double remaining_weight, double initial_weight);
+// UI thread only: overlay / pull CallAfter. Looks up a loaded filament
+// preset whose alias (name before '@') equals "{brand} {series}".
+void             apply_spoolman_preset_match(FilamentSpool& spool);
 
 class SpoolmanClient {
 public:

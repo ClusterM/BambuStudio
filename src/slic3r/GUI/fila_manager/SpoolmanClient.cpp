@@ -2,7 +2,9 @@
 #include "wgtFilaManagerColorType.h"
 #include "wgtFilaManagerFeature.h"
 
+#include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/Utils/Http.hpp"
+#include "libslic3r/PresetBundle.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -24,6 +26,18 @@ std::string trim_copy(const std::string& value)
     while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])))
         --end;
     return value.substr(begin, end - begin);
+}
+
+bool iequals_ascii(const std::string& a, const std::string& b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i]))
+            != std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+    }
+    return true;
 }
 
 std::string trim_slash(std::string value)
@@ -245,6 +259,36 @@ FilamentSpool spool_from_spoolman_json(const nlohmann::json& j)
     if (s.updated_at.empty())
         s.updated_at = json_string(j, "registered");
     return s;
+}
+
+void apply_spoolman_preset_match(FilamentSpool& spool)
+{
+    const std::string brand  = trim_copy(spool.brand);
+    const std::string series = trim_copy(spool.series);
+    if (brand.empty() || series.empty())
+        return;
+
+    PresetBundle* bundle = wxGetApp().preset_bundle;
+    if (!bundle)
+        return;
+
+    const std::string want = brand + " " + series;
+    auto& filaments = bundle->filaments;
+    for (auto it = filaments.begin(); it != filaments.end(); ++it) {
+        Preset& preset = *it;
+        if (filaments.get_preset_base(preset) != &preset)
+            continue;
+        const std::string alias = trim_copy(filaments.get_preset_alias(preset, true));
+        if (alias.empty() || !iequals_ascii(alias, want))
+            continue;
+
+        const std::string type = preset.config.get_filament_type();
+        if (!type.empty())
+            spool.material_type = type;
+        if (!preset.filament_id.empty())
+            spool.filament_id = preset.filament_id;
+        return;
+    }
 }
 
 SpoolmanClient::SpoolmanClient(SpoolmanEndpoint endpoint)

@@ -253,22 +253,23 @@ void AmsSpoolOverlay::apply_refresh_to_store()
     auto upsert = [this](const CachedSlot& slot) {
         if (!slot.has_spool || slot.spool_id <= 0)
             return;
-        if (m_store->get_spool(slot.spool.spool_id)) {
-            FilamentSpool updated = slot.spool;
-            if (const FilamentSpool* existing = m_store->get_spool(slot.spool.spool_id)) {
-                updated.in_printer   = existing->in_printer;
-                updated.dev_id       = existing->dev_id;
-                updated.ams_sn       = existing->ams_sn;
-                updated.ams_id       = existing->ams_id;
-                updated.ams_type     = existing->ams_type;
-                updated.slot_id      = existing->slot_id;
-                updated.device_name  = existing->device_name;
-                updated.bound_dev_id = existing->bound_dev_id;
-                updated.bound_ams_id = existing->bound_ams_id;
+        FilamentSpool spool = slot.spool;
+        apply_spoolman_preset_match(spool);
+        if (m_store->get_spool(spool.spool_id)) {
+            if (const FilamentSpool* existing = m_store->get_spool(spool.spool_id)) {
+                spool.in_printer   = existing->in_printer;
+                spool.dev_id       = existing->dev_id;
+                spool.ams_sn       = existing->ams_sn;
+                spool.ams_id       = existing->ams_id;
+                spool.ams_type     = existing->ams_type;
+                spool.slot_id      = existing->slot_id;
+                spool.device_name  = existing->device_name;
+                spool.bound_dev_id = existing->bound_dev_id;
+                spool.bound_ams_id = existing->bound_ams_id;
             }
-            m_store->update_spool_if_changed(updated);
+            m_store->update_spool_if_changed(spool);
         } else {
-            m_store->add_spool(slot.spool);
+            m_store->add_spool(spool);
         }
     };
 

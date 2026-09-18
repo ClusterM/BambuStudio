@@ -367,6 +367,8 @@ void wgtFilaManagerCloudSync::apply_pulled_spools(const std::vector<FilamentSpoo
 
     for (FilamentSpool cloud_spool : list) {
         if (cloud_spool.spool_id.empty()) continue;
+        if (is_spoolman_enabled())
+            apply_spoolman_preset_match(cloud_spool);
         cloud_spool.cloud_synced = true;
         cloud_ids.insert(cloud_spool.spool_id);
 
