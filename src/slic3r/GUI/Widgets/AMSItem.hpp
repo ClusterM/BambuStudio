@@ -132,7 +132,14 @@ enum FilamentStepType {
 #define AMS_PREV_FOUR_SIZE wxSize(FromDIP(52), FromDIP(32))
 #define AMS_PREV_SINGLE_SIZE wxSize(FromDIP(28), FromDIP(32))
 #define AMS_ITEM_HUMIDITY_SIZE wxSize(FromDIP(120), FromDIP(27))
-#define AMS_CAN_LIB_SIZE wxSize(FromDIP(52), FromDIP(80))
+// AMSLib is a vertical stack: spool tank, dot-matrix display, edit icon row
+// (AMS Lite top row is mirrored: icon, display, tank).
+#define AMS_LIB_TANK_H      FromDIP(80)
+#define AMS_LIB_DISPLAY_H   FromDIP(20)
+#define AMS_LIB_ICON_H      FromDIP(14)
+#define AMS_LIB_DISPLAY_GAP FromDIP(3)
+#define AMS_LIB_EXTRA_H     (AMS_LIB_DISPLAY_GAP + AMS_LIB_DISPLAY_H + AMS_LIB_DISPLAY_GAP + AMS_LIB_ICON_H) // 40
+#define AMS_CAN_LIB_SIZE wxSize(FromDIP(52), AMS_LIB_TANK_H + AMS_LIB_EXTRA_H)
 #define AMS_LITE_CAN_LIB_SIZE wxSize(FromDIP(49), FromDIP(72))
 #define AMS_CAN_ROAD_SIZE wxSize(FromDIP(264), FromDIP(50))
 #define AMS_ITEMS_PANEL_SIZE wxSize(FromDIP(264), FromDIP(44))
@@ -469,7 +476,7 @@ public:
 
     int          m_can_index = 0;
     bool         transparent_changed = { false };
-    DevAmsType         m_ams_model;
+    DevAmsType         m_ams_model = { DevAmsType::AMS };
     AMSModelOriginType m_ext_type = { AMSModelOriginType::GENERIC_EXT };
 
     void         Update(Caninfo info, std::string ams_idx, bool refresh = true);
@@ -489,6 +496,10 @@ public:
     void         set_new_filament_hint(bool show) { if (m_show_new_filament_hint != show) { m_show_new_filament_hint = show; Refresh(); } }
     void         msw_rescale();
     void         on_pass_road(bool pass);
+    // Sub-areas of the widget, in window coordinates.
+    wxRect       tank_rect() const;
+    wxRect       display_rect() const;
+    wxRect       icon_rect() const;
 
 protected:
     wxStaticBitmap *m_edit_bitmp       = {nullptr};
@@ -532,17 +543,23 @@ protected:
     bool m_pass_road{ false };
     bool m_show_new_filament_hint{ false };
     ScalableBitmap  m_bitmap_new_filament_hint;
+    wxBitmap        m_display_bmp;
+    wxString        m_display_cache_key;
 
     void on_enter_window(wxMouseEvent &evt);
     void on_leave_window(wxMouseEvent &evt);
     void on_left_down(wxMouseEvent &evt);
     void paintEvent(wxPaintEvent &evt);
     void render(wxDC &dc);
-    void render_lite_text(wxDC& dc);
-    void render_generic_text(wxDC& dc);
+    void render_display(wxDC& dc);
+    void render_edit_icon(wxDC& dc);
     void doRender(wxDC& dc);
     void render_lite_lib(wxDC& dc);
     void render_generic_lib(wxDC& dc);
+    // AMS Lite top-row slots hang below the frame, so display/icon go above the tank.
+    bool display_on_top() const;
+    bool is_editable_state() const;
+    void compute_k_display(bool& show_k, bool& k_loading);
 };
 
 /*************************************************
