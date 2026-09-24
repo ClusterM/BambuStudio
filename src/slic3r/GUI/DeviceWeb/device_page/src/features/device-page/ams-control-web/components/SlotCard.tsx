@@ -40,23 +40,19 @@ function trayArtwork(slot: SlotView, variant: SlotCardVariant): TrayArtwork {
     : { base: trayRightSvg, hover: trayRightHoverSvg, selected: trayRightSelectedSvg, width: TRAY_ICON.sideWidth };
 }
 
-// Mirrors AMSLib::render_generic_text: a name holding a space or a hyphen is laid
-// out as two smaller lines instead of one, so a long name cannot spill over the K
-// row below it. The separator stays with the second line and, as in C++, the last
-// separator of this list wins when the name carries both.
-const NAME_SPLIT_CHARS = [' ', '-'];
-
-function splitFilamentName(name: string): [string, string] | null {
-  let at = -1;
-  for (const separator of NAME_SPLIT_CHARS) {
-    const index = name.indexOf(separator);
-    if (index >= 0) at = index;
-  }
-  if (at < 0) return null;
-  return [name.slice(0, at), name.slice(at)];
-}
-
 const CURSOR_TIP_OFFSET = { x: 16, y: 8 } as const;
+
+// Manufacturer, series words and grams come from C++. K stays on its own line.
+function slotCaptionLines(slot: SlotView): string[] {
+  const lines = slot.info_lines.filter((line) => line.length > 0);
+  if (slot.k_loading) {
+    lines.push('K');
+    if (slot.k_loading_text) lines.push(slot.k_loading_text);
+  } else if (slot.k_text) {
+    lines.push(slot.k_text);
+  }
+  return lines;
+}
 
 function CursorTip({ text, origin }: { text: string; origin: { x: number; y: number } }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -276,7 +272,7 @@ export function SlotCard({
   const lite = variant === 'lite' || liteExt;
   const liteInset = liteExt ? LITE_EXT_COLOR_INSET : LITE_COLOR_INSET;
   const size = lite ? SLOT_LIB_LITE : SLOT_LIB;
-  const glyphBottom = lite ? 20 : 15;
+  const glyphBottom = 1;
   const empty = slot.slot_state === 'empty' || slot.slot_state === 'none';
   const showEmptySlash = lite && slot.slot_state === 'empty';
   const showEmptyLabel = !lite && slot.slot_state === 'empty';
@@ -306,15 +302,9 @@ export function SlotCard({
       ? amsReadonlyLightUrl
       : amsReadonlyUrl;
   const tray = lite ? trayArtwork(slot, variant) : null;
-  const showK = !lite && (!!slot.k_text || slot.k_loading);
-  const nameLines =
-    !lite && !showEmptyLabel && !slot.show_unknown ? splitFilamentName(slot.fila_type) : null;
-  const kTip = slot.k_loading
-    ? (slot.k_loading_text ? `K ${slot.k_loading_text}` : 'K')
-    : slot.k_text;
-  const tip = !empty && !slot.show_unknown && slot.fila_type
-    ? (showK && kTip ? `${slot.fila_type}\n${kTip}` : slot.fila_type)
-    : undefined;
+  const captionLines = !empty && !slot.show_unknown ? slotCaptionLines(slot) : [];
+  const tip = captionLines.length > 0 ? captionLines.join('\n') : undefined;
+  const iconReserve = showEdit || showRead ? 16 : 0;
   const [tipOrigin, setTipOrigin] = useState<{ x: number; y: number } | null>(null);
 
   return (
@@ -412,58 +402,26 @@ export function SlotCard({
         >
           {t('Empty')}
         </span>
-      ) : nameLines ? (
-        <>
-          <span
-            className={cn(
-              'pointer-events-none absolute inset-x-0 z-[1] block truncate px-[2px] text-center text-[12px] leading-[14px]',
-              showK ? 'top-[2px]' : 'top-[22px]',
-            )}
-            style={{ color: contrast.textColor }}
-          >
-            {nameLines[0]}
-          </span>
-          <span
-            className={cn(
-              'pointer-events-none absolute inset-x-0 z-[1] block truncate px-[2px] text-center text-[12px] leading-[14px]',
-              showK ? 'top-[16px]' : 'top-[36px]',
-            )}
-            style={{ color: contrast.textColor }}
-          >
-            {nameLines[1]}
-          </span>
-        </>
-      ) : (
+      ) : slot.show_unknown ? (
         <span
-          className={
-            lite
-              ? 'pointer-events-none absolute inset-x-0 top-[20px] z-[1] block truncate px-[2px] text-center text-[10px] leading-[12px]'
-              : showK
-                ? 'pointer-events-none absolute inset-x-0 top-[6px] z-[1] block truncate px-[2px] text-center text-[13px] leading-[17px]'
-                : 'absolute inset-x-0 top-[28px] z-[1] block truncate px-[2px] text-center text-[13px] leading-[17px]'
-          }
-          style={{ color: contrast.textColor, transform: lite ? 'translateX(3px)' : undefined }}
+          className="pointer-events-none absolute inset-x-0 z-[1] flex items-center justify-center text-[13px] leading-[17px]"
+          style={{ top: 0, bottom: px(iconReserve), color: contrast.textColor }}
         >
-          {slot.show_unknown ? '?' : slot.fila_type}
+          ?
         </span>
-      )}
-
-      {showK ? (
+      ) : captionLines.length > 0 ? (
         <span
-          className={cn(
-            'pointer-events-none absolute inset-x-0 z-[1] block px-[2px] text-center text-[11px] leading-[14px]',
-            nameLines ? 'top-[30px]' : 'top-[24px]',
-          )}
-          style={{ color: contrast.textColor }}
+          className="pointer-events-none absolute inset-x-0 z-[1] flex flex-col items-center justify-center overflow-hidden px-[1px]"
+          style={{ top: px(2), bottom: px(iconReserve + 1), color: contrast.textColor }}
         >
-          {slot.k_loading ? (
-            <>
-              <span className="block">K</span>
-              <span className="block">{slot.k_loading_text || 'loading'}</span>
-            </>
-          ) : (
-            slot.k_text
-          )}
+          {captionLines.map((line, index) => (
+            <span
+              key={index}
+              className="block w-full truncate text-center text-[9px] leading-[11px]"
+            >
+              {line}
+            </span>
+          ))}
         </span>
       ) : null}
 

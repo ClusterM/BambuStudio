@@ -102,6 +102,7 @@ SchemaFormat::Tray build_tray(MachineObject* machine_obj,
     out.sub_brands = tray->sub_brands;
     out.setting_id = tray->setting_id;
     out.tag_uid    = tray->tag_uid;
+    out.uuid       = tray->uuid;
     out.color      = normalize_hex_for_web(tray->color);
     out.color_type = static_cast<int>(tray->ctype);
     out.remain     = tray->remain;

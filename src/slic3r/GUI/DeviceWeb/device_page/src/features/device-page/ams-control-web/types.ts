@@ -82,9 +82,12 @@ export interface SlotView {
   color_type: AmsColorType;
   remain: number;
   show_remain: boolean;
-  // When true the card fill height encodes remain. Default off: full-bleed colour.
+  // When true the card fill height encodes remain. Kept off: the tank stays full
+  // and remain is the capsule above the card.
   show_remain_height: boolean;
   fila_type: string;
+  // Manufacturer, then one series word per line, then remaining grams.
+  info_lines: string[];
   selected: boolean;
   loaded: boolean;
   reading: boolean;

@@ -66,6 +66,7 @@ namespace tray {
     inline constexpr const char* sub_brands  = "sub_brands";
     inline constexpr const char* setting_id  = "setting_id";
     inline constexpr const char* tag_uid     = "tag_uid";
+    inline constexpr const char* uuid        = "uuid";
     inline constexpr const char* color       = "color";
     inline constexpr const char* colors      = "colors";
     inline constexpr const char* color_type  = "color_type";
@@ -115,6 +116,7 @@ struct Tray
     std::string              sub_brands;
     std::string              setting_id;
     std::string              tag_uid;
+    std::string              uuid; // Spoolman spool id when the overlay is applied
     std::string              color      = "#D9D9D9";
     std::vector<std::string> colors;
     int                      color_type = 2; // DevFilaColorType: 0 gradient, 1 multi, 2 single
@@ -191,6 +193,7 @@ inline void to_json(nlohmann::json& j, const Tray& v)
         {tray::sub_brands, v.sub_brands},
         {tray::setting_id, v.setting_id},
         {tray::tag_uid,    v.tag_uid},
+        {tray::uuid,       v.uuid},
         {tray::color,      v.color},
         {tray::colors,     v.colors},
         {tray::color_type, v.color_type},

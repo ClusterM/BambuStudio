@@ -4,6 +4,7 @@
 
 #include "slic3r/GUI/DeviceManager.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
+#include "slic3r/GUI/fila_manager/wgtFilaManagerStore.h"
 #include "slic3r/GUI/I18N.hpp"
 #include "slic3r/GUI/DeviceCore/DevCalib.h"
 #include "slic3r/GUI/DeviceCore/DevConfig.h"
@@ -97,6 +98,59 @@ void fill_slot_k(SchemaFormat::SlotView& view,
     }
 }
 
+static void append_words(std::vector<std::string>& lines, const std::string& text)
+{
+    std::string word;
+    for (char c : text) {
+        if (c == ' ' || c == '\t') {
+            if (!word.empty()) {
+                lines.push_back(word);
+                word.clear();
+            }
+        } else {
+            word.push_back(c);
+        }
+    }
+    if (!word.empty())
+        lines.push_back(word);
+}
+
+// Manufacturer, then one series word per line, then remaining grams.
+// Series usually already contains the material type ("PLA Basic").
+static void fill_info_lines(SchemaFormat::SlotView& view, const SchemaFormat::Tray& tray)
+{
+    if (view.show_unknown || view.slot_state == SchemaValues::slot_state::empty ||
+        view.slot_state == SchemaValues::slot_state::none)
+        return;
+
+    std::string brand;
+    std::string series;
+    int         grams = tray.remain_g;
+
+    if (tray.spoolman_overlay) {
+        if (auto* store = wxGetApp().fila_manager_store()) {
+            if (const FilamentSpool* spool = store->get_spool(tray.uuid)) {
+                brand  = spool->brand;
+                series = spool->series.empty() ? spool->material_type : spool->series;
+                if (grams < 0)
+                    grams = static_cast<int>(std::lround(spool->net_weight));
+            }
+        }
+    }
+    if (series.empty())
+        series = tray.sub_brands.empty() ? tray.fila_type : tray.sub_brands;
+    if (brand.empty() && wxGetApp().preset_bundle && !tray.setting_id.empty()) {
+        if (auto info = wxGetApp().preset_bundle->get_filament_by_filament_id(tray.setting_id))
+            brand = info->vendor;
+    }
+
+    if (!brand.empty())
+        view.info_lines.push_back(brand);
+    append_words(view.info_lines, series);
+    if (grams >= 0)
+        view.info_lines.push_back(wxString::Format("%d g", grams).ToStdString());
+}
+
 SchemaFormat::SlotView build_slot_view(const SchemaFormat::Tray& tray,
                                        const SchemaFormat::State& state,
                                        MachineObject* machine_obj,
@@ -159,16 +213,15 @@ SchemaFormat::SlotView build_slot_view(const SchemaFormat::Tray& tray,
     const bool printer_remain = !is_ext && is_bbl && tray.info_ready && state.data.detect_remain_enabled;
     view.show_remain = overlay_remain || printer_remain;
     view.remain      = (view.show_remain && tray.remain >= 0 && tray.remain <= 100) ? tray.remain : 100;
-    // Official RFID remain stays capsule-only. Overlay remain is the tank level.
-    view.show_remain_height = overlay_remain;
+    // Remain is the capsule above the card. The tank itself stays full.
+    view.show_remain_height = false;
 
-    // The capsule remains the default visualization; height fill is controlled
-    // independently and stays disabled unless a future caller opts in.
     view.slot_remain_line.show_line      = view.show_remain && has_spool;
     view.slot_remain_line.remain_percent = view.remain >= 5 ? view.remain : 5;// the visual min val is 5
 
     view.menu_actions = build_menu_actions(tray, view.slot_state, view_only);
     fill_slot_k(view, tray, machine_obj, show_kn);
+    fill_info_lines(view, tray);
     return view;
 }
 
