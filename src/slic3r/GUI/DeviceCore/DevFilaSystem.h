@@ -87,6 +87,7 @@ public:
     wxColour        wx_color;
     bool            is_bbl;
     bool            is_exists = false;
+    bool            spoolman_overlay = false; // remain/uuid filled from Spoolman+HA
     int             hold_count = 0;
     int             remain = 0;         // filament remain: 0 ~ 100
     int             remain_g = -1;      // accurate remaining weight in grams; -1 means not edited / not provided by firmware

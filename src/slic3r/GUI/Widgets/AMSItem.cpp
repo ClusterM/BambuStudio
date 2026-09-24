@@ -105,7 +105,12 @@ bool AMSinfo::parse_ams_info(MachineObject *obj, DevAms *ams, bool remain_flag, 
                     info.material_state = AMSCanType::AMS_CAN_TYPE_THIRDBRAND;
                 }
 
-                if (!DevFilaSystem::IsBBL_Filament(it->second->tag_uid) || !remain_flag) {
+                if (it->second->spoolman_overlay) {
+                    if (it->second->remain < 0 || it->second->remain > 100)
+                        info.material_remain = 100;
+                    else
+                        info.material_remain = it->second->remain;
+                } else if (!DevFilaSystem::IsBBL_Filament(it->second->tag_uid) || !remain_flag) {
                     info.material_remain = 100;
                 } else {
                     if(it->second->remain < 0 || it->second->remain > 100) {
@@ -171,7 +176,10 @@ void AMSinfo::parse_ext_info(MachineObject* obj, DevAmsTray tray) {
         for (std::string cols : tray.cols) {
             info.material_cols.push_back(DevAmsTray::decode_color(cols));
         }
-        info.material_remain = 100;
+        if (tray.spoolman_overlay && tray.remain >= 0 && tray.remain <= 100)
+            info.material_remain = tray.remain;
+        else
+            info.material_remain = 100;
     }
     else {
         info.material_name = "";
