@@ -72,6 +72,7 @@ namespace tray {
     inline constexpr const char* remain      = "remain";
     inline constexpr const char* remain_g    = "remain_g";
     inline constexpr const char* is_bbl      = "is_bbl";
+    inline constexpr const char* spoolman_overlay = "spoolman_overlay";
     inline constexpr const char* reading     = "reading";
     inline constexpr const char* info_ready  = "info_ready";
     inline constexpr const char* binded_extruder_ids = "binded_extruder_ids";
@@ -121,6 +122,7 @@ struct Tray
     int                      remain_g   = -1;
 
     bool                     is_bbl     = false;
+    bool                     spoolman_overlay = false; // remain filled from Spoolman, not RFID
     bool                     reading    = false;
     bool                     is_exists  = false;
     bool                     info_ready = false;
@@ -195,6 +197,7 @@ inline void to_json(nlohmann::json& j, const Tray& v)
         {tray::remain,     v.remain},
         {tray::remain_g,   v.remain_g},
         {tray::is_bbl,     v.is_bbl},
+        {tray::spoolman_overlay, v.spoolman_overlay},
         {tray::reading,    v.reading},
         {tray::info_ready, v.info_ready},
         {tray::binded_extruder_ids, v.binded_extruder_ids},

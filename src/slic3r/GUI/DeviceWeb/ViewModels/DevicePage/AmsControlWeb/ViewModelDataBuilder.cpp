@@ -107,6 +107,7 @@ SchemaFormat::Tray build_tray(MachineObject* machine_obj,
     out.remain     = tray->remain;
     out.remain_g   = tray->remain_g;
     out.is_bbl     = tray->is_bbl;
+    out.spoolman_overlay = tray->spoolman_overlay;
     out.binded_extruder_ids.assign(tray->binded_extruder_set.begin(), tray->binded_extruder_set.end());
     if (tray->current_extruder_id.has_value())
         out.current_extruder_id = *tray->current_extruder_id;

@@ -152,9 +152,15 @@ SchemaFormat::SlotView build_slot_view(const SchemaFormat::Tray& tray,
         view.fila_type  = tray.fila_type;
     }
 
-    view.show_remain = !is_ext && is_bbl && tray.info_ready && state.data.detect_remain_enabled;
+    // Spoolman overlay writes a real remain onto the tray (including third-party
+    // and ext slots). That percentage is trusted the same way as a printer
+    // report, so it does not need an official RFID tag or detect-remain.
+    const bool overlay_remain = tray.spoolman_overlay && tray.remain >= 0 && tray.remain <= 100;
+    const bool printer_remain = !is_ext && is_bbl && tray.info_ready && state.data.detect_remain_enabled;
+    view.show_remain = overlay_remain || printer_remain;
     view.remain      = (view.show_remain && tray.remain >= 0 && tray.remain <= 100) ? tray.remain : 100;
-    view.show_remain_height = false;
+    // Official RFID remain stays capsule-only. Overlay remain is the tank level.
+    view.show_remain_height = overlay_remain;
 
     // The capsule remains the default visualization; height fill is controlled
     // independently and stays disabled unless a future caller opts in.
