@@ -15,9 +15,10 @@
 # MAX_PATH under the deps ExternalProject tree. Boolean build (OMC_BUILD_TEST=OFF)
 # does not need CGAL/googletest; prepare only fills empty submodule placeholders
 # (eigen / parallel-hashmap / oneTBB) and vendors {fmt} for GCC9 / old Apple libc++.
-# Linux/mac/AVX compatibility lives in the fetched OpenMeshCraft zip
-# (bambulab/OpenMeshCraft @0e8d12c3, merged PR #2 OMC::format);
-# do not mutate unzipped .h/.cpp here.
+# Format compatibility lives in the fetched OpenMeshCraft zip
+# (bambulab/OpenMeshCraft @0e8d12c3, merged PR #2 OMC::format).
+# x86 SIMD is disabled via CMake args on Apple and aarch64; do not
+# mutate unzipped .h/.cpp here.
 
 set(_OMC_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(_OMC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/omc_gen")
@@ -239,8 +240,10 @@ if(MPFR_PKG)
   list(APPEND _OMC_DEPENDS ${MPFR_PKG})
 endif()
 
+# -mavx2/-mfma are x86-only; Apple Silicon and Linux/Windows ARM must not
+# inherit the Linux x86 defaults from CMakeLists.txt.in.
 set(_OMC_SIMD_ARGS "")
-if(APPLE)
+if(APPLE OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64|arm64)$" OR CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
   set(_OMC_SIMD_ARGS
     -DOMC_CMAKE_ENABLE_SSE2=OFF
     -DOMC_CMAKE_ENABLE_AVX=OFF
