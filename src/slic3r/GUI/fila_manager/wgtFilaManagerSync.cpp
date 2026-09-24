@@ -3,6 +3,7 @@
 #include "wgtFilaManagerCloudSync.h"
 #include "wgtFilaManagerCloudClient.h"
 #include "wgtFilaManagerCloudDispatcher.h"
+#include "wgtFilaManagerFeature.h"
 #include "AmsAutoPushThrottle.h"
 
 #include "slic3r/GUI/GUI_App.hpp"
@@ -89,6 +90,7 @@ void wgtFilaManagerSync::calibrate_pending_badges(MachineObject* obj)
 
 void wgtFilaManagerSync::check_and_register_new_rfid_spools(MachineObject* obj)
 {
+    if (is_spoolman_enabled()) return;
     if (!obj || !m_store) return;
 
     auto* disp = wxGetApp().fila_manager_cloud_disp();
@@ -328,6 +330,9 @@ bool wgtFilaManagerSync::sync_all_trays(MachineObject* obj)
         dev_id, dev_name, present_now, &mount_changed_ids, &ejected_snapshots);
 
     if (any_changed || mount_changed) m_store->set_dirty();
+
+    if (is_spoolman_enabled())
+        return mount_changed;
 
     if (!changed.empty()) {
         if (auto* cloud = wxGetApp().fila_manager_cloud_sync()) {

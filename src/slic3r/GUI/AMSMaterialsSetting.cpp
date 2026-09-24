@@ -601,6 +601,42 @@ void AMSMaterialsSetting::on_select_reset(wxCommandEvent& event) {
 }
 
 
+// PA history on the printer is keyed by Bambu tray_info_idx (GFL99, …).
+// Spoolman catalog entries have no such id, so resolve in order:
+//   1. spool.filament_id when it is a known preset
+//   2. AMS tray.setting_id (MQTT tray_info_idx)
+//   3. Generic {material_type} from the preset list
+static std::string resolve_ams_filament_id(
+    const FilamentSpool* spool,
+    MachineObject* obj,
+    int ams_id,
+    int slot_id,
+    PresetBundle* preset_bundle,
+    const std::map<std::string, AMSMaterialsSetting::FilamentInfos>& map_filament_items)
+{
+    auto known = [&](const std::string& id) {
+        return preset_bundle && !id.empty() && preset_bundle->get_filament_by_filament_id(id).has_value();
+    };
+
+    if (spool && known(spool->filament_id))
+        return spool->filament_id;
+
+    if (obj) {
+        if (auto tray = obj->get_tray(std::to_string(ams_id), std::to_string(slot_id))) {
+            if (known(tray->setting_id))
+                return tray->setting_id;
+        }
+    }
+
+    if (spool && !spool->material_type.empty()) {
+        const std::string generic_alias = "Generic " + spool->material_type;
+        auto it = map_filament_items.find(generic_alias);
+        if (it != map_filament_items.end() && known(it->second.filament_id))
+            return it->second.filament_id;
+    }
+    return {};
+}
+
 static DevFilaBlacklist::CheckResult
 sCheckFilamentInfo(PresetBundle* preset_bundle,
                    MachineObject* obj,
@@ -847,8 +883,9 @@ void AMSMaterialsSetting::on_select_ok(wxCommandEvent& event)
         auto* store = wxGetApp().fila_manager_store();
         const FilamentSpool* sp = store ? store->get_spool(m_selected_spool_id) : nullptr;
         if (sp) {
-            filament_item.filament_id = sp->filament_id;
-            filament_item.setting_id  = sp->filament_id;
+            filament_item.filament_id = resolve_ams_filament_id(
+                sp, obj, ams_id, slot_id, preset_bundle, map_filament_items);
+            filament_item.setting_id  = filament_item.filament_id;
             filament_item.spool_id    = sp->spool_id;
         }
     }
@@ -2512,7 +2549,9 @@ void AMSMaterialsSetting::apply_filament_selection()
         auto* store = wxGetApp().fila_manager_store();
         const FilamentSpool* sp = store ? store->get_spool(m_selected_spool_id) : nullptr;
         if (sp && preset_bundle) {
-            auto fila_info = preset_bundle->get_filament_by_filament_id(sp->filament_id);
+            const std::string fila_id = resolve_ams_filament_id(
+                sp, obj, ams_id, slot_id, preset_bundle, map_filament_items);
+            auto fila_info = preset_bundle->get_filament_by_filament_id(fila_id);
             if (fila_info.has_value()) {
                 ams_filament_id = fila_info->filament_id;
                 ams_setting_id  = fila_info->setting_id;

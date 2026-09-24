@@ -100,6 +100,7 @@ class ModelMallDialog;
 class PingCodeBindDialog;
 class NetworkErrorDialog;
 class OpenGLManager;
+class AmsSpoolOverlay;
 
 enum FileType
 {
@@ -346,6 +347,7 @@ private:
     wgtFilaManagerCloudClient*      m_fila_manager_cloud_client { nullptr };
     wgtFilaManagerCloudSync*        m_fila_manager_cloud_sync   { nullptr };
     wgtFilaManagerCloudDispatcher*  m_fila_manager_cloud_disp   { nullptr };
+    AmsSpoolOverlay*                m_ams_spool_overlay         { nullptr };
     bool                            m_disable_fila_manager      { false };
     std::vector<std::string> need_delete_presets;   // store setting ids of preset
     std::vector<bool> m_create_preset_blocked { false, false, false, false, false, false }; // excceed limit
@@ -410,6 +412,7 @@ public:
     wgtFilaManagerCloudClient*      fila_manager_cloud_client() { return m_fila_manager_cloud_client; }
     wgtFilaManagerCloudSync*        fila_manager_cloud_sync()   { return m_fila_manager_cloud_sync; }
     wgtFilaManagerCloudDispatcher*  fila_manager_cloud_disp()   { return m_fila_manager_cloud_disp; }
+    AmsSpoolOverlay*                ams_spool_overlay()         { return m_ams_spool_overlay; }
     bool                            is_fila_manager_disabled() const { return m_disable_fila_manager; }
     void notify_new_rfid_filament(const std::string& ams_id, const std::string& slot_id);
     void open_new_official_filament_hint(const std::string& ams_id, const std::string& slot_id);

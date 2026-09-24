@@ -2,6 +2,7 @@
 #define slic3r_wgtFilaManagerSync_h_
 
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>

@@ -358,7 +358,12 @@ export function SpoolTable({
                         />
                       </div>
                       <div className="flex flex-col gap-[2px] min-w-0">
-                        <span data-testid="filament-row-name" className="text-sm text-fm-text-primary leading-[22px]">{nameParts || '—'}</span>
+                        <span data-testid="filament-row-name" className="text-sm text-fm-text-primary leading-[22px]">
+                          {nameParts || '—'}
+                          {s.spool_id && (
+                            <span className="ml-1.5 font-mono text-[11px] text-fm-text-secondary opacity-70">#{s.spool_id}</span>
+                          )}
+                        </span>
                         {/* STUDIO-17977: align with AddEditDialog preview-bar
                             and DetailDialog color field — show the same
                             "[swatch] colorName · #RRGGBB / #RRGGBB" tail so

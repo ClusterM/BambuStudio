@@ -427,6 +427,39 @@ void AppConfig::set_defaults()
         set("helio_api_other", "https://api.helioadditive.com/graphql");
     }
 
+    // Spoolman / Home Assistant: optional local inventory instead of Bambu cloud.
+    // Credentials for Spoolman go inside the URL (https://user:password@host/api/v1).
+    if (get("spoolman_url").empty())
+        set("spoolman_url", "");
+    if (get("ha_url").empty())
+        set("ha_url", "");
+    if (get("ha_token").empty())
+        set("ha_token", "");
+    // ha_spool_<code>. Codes: a1..d4 (AMS / AMS 2 Pro), ht_a..ht_h (AMS HT),
+    // external (left / primary spool), external_aux (right spool).
+    // Studio calls the right nozzle MAIN (vir_slot 255) and the left DEPUTY
+    // (vir_slot 254). external is the left one; external_aux is the right one.
+    // A single-extruder printer only has vir_slot 255, which maps to external.
+    auto seed_ha_spool = [this](const std::string& key, const char* fallback) {
+        if (get(key).empty())
+            set(key, fallback ? fallback : "");
+    };
+    for (char unit = 'a'; unit <= 'd'; ++unit) {
+        for (int slot = 1; slot <= 4; ++slot) {
+            const std::string key = std::string("ha_spool_") + unit + std::to_string(slot);
+            const std::string fallback = (unit == 'a')
+                ? std::string("input_number.ams_tray_") + std::to_string(slot) + "_spool_id"
+                : std::string();
+            seed_ha_spool(key, fallback.empty() ? "" : fallback.c_str());
+        }
+    }
+    for (char unit = 'a'; unit <= 'h'; ++unit) {
+        const std::string key = std::string("ha_spool_ht_") + unit;
+        seed_ha_spool(key, unit == 'a' ? "input_number.ams_ht_spool_id" : "");
+    }
+    seed_ha_spool("ha_spool_external", "input_number.external_spool_id");
+    seed_ha_spool("ha_spool_external_aux", "input_number.external_spool_2_id");
+
     if (get("max_recent_count").empty()) {
         set("max_recent_count", "18");
     }
