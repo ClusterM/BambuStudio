@@ -66,12 +66,14 @@ namespace tray {
     inline constexpr const char* sub_brands  = "sub_brands";
     inline constexpr const char* setting_id  = "setting_id";
     inline constexpr const char* tag_uid     = "tag_uid";
+    inline constexpr const char* uuid        = "uuid";
     inline constexpr const char* color       = "color";
     inline constexpr const char* colors      = "colors";
     inline constexpr const char* color_type  = "color_type";
     inline constexpr const char* remain      = "remain";
     inline constexpr const char* remain_g    = "remain_g";
     inline constexpr const char* is_bbl      = "is_bbl";
+    inline constexpr const char* spoolman_overlay = "spoolman_overlay";
     inline constexpr const char* reading     = "reading";
     inline constexpr const char* info_ready  = "info_ready";
     inline constexpr const char* binded_extruder_ids = "binded_extruder_ids";
@@ -114,6 +116,7 @@ struct Tray
     std::string              sub_brands;
     std::string              setting_id;
     std::string              tag_uid;
+    std::string              uuid; // Spoolman spool id when the overlay is applied
     std::string              color      = "#D9D9D9";
     std::vector<std::string> colors;
     int                      color_type = 2; // DevFilaColorType: 0 gradient, 1 multi, 2 single
@@ -121,6 +124,7 @@ struct Tray
     int                      remain_g   = -1;
 
     bool                     is_bbl     = false;
+    bool                     spoolman_overlay = false; // remain filled from Spoolman, not RFID
     bool                     reading    = false;
     bool                     is_exists  = false;
     bool                     info_ready = false;
@@ -189,12 +193,14 @@ inline void to_json(nlohmann::json& j, const Tray& v)
         {tray::sub_brands, v.sub_brands},
         {tray::setting_id, v.setting_id},
         {tray::tag_uid,    v.tag_uid},
+        {tray::uuid,       v.uuid},
         {tray::color,      v.color},
         {tray::colors,     v.colors},
         {tray::color_type, v.color_type},
         {tray::remain,     v.remain},
         {tray::remain_g,   v.remain_g},
         {tray::is_bbl,     v.is_bbl},
+        {tray::spoolman_overlay, v.spoolman_overlay},
         {tray::reading,    v.reading},
         {tray::info_ready, v.info_ready},
         {tray::binded_extruder_ids, v.binded_extruder_ids},

@@ -223,6 +223,7 @@ function normalizeSlotView(raw: unknown): SlotView {
     show_remain: !!item.show_remain,
     show_remain_height: !!item.show_remain_height,
     fila_type: asString(item.fila_type),
+    info_lines: asList(item.info_lines, (line) => asString(line)).filter((line) => line.length > 0),
     selected: !!item.selected,
     loaded: !!item.loaded,
     reading: !!item.reading,
