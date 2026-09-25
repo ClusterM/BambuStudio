@@ -566,7 +566,16 @@ protected:
 
     wgtDeviceNozzleRack* m_panel_nozzle_rack{ nullptr };
 
+    wxPanel *       m_panel_separator_middle{ nullptr };
     wxPanel *       m_panel_separator_right;
+    StaticBox*      m_temp_axis_box{ nullptr };
+    // Preferred Control-column box width, DIP. Kept even when the window is
+    // still too narrow to show it; the applied width is the clamped value.
+    int             m_ctrl_box_width_dip{ 586 };
+    int             m_ctrl_box_applied_dip{ 0 };
+    bool            m_ctrl_sash_dragging{ false };
+    int             m_ctrl_sash_start_x{ 0 };
+    int             m_ctrl_sash_start_dip{ 586 };
     wxPanel *       m_panel_separotor_bottom;
     wxGridBagSizer *m_tasklist_info_sizer{nullptr};
     wxBoxSizer *    m_printing_sizer;
@@ -658,6 +667,19 @@ public:
     void on_camera_fullscreen(wxMouseEvent& event);
 
 private:
+    static constexpr int kCtrlBoxMinDip = 586;
+    static constexpr int kCtrlBoxSidePadDip = 8;
+
+    void load_ctrl_box_width();
+    int  clamp_ctrl_box_width_dip(int width_dip) const;
+    void apply_ctrl_box_width(int width_dip);
+    void store_ctrl_box_width();
+    void on_ctrl_sash_down(wxMouseEvent& event);
+    void on_ctrl_sash_motion(wxMouseEvent& event);
+    void on_ctrl_sash_up(wxMouseEvent& event);
+    void on_ctrl_sash_capture_lost(wxMouseCaptureLostEvent& event);
+    void on_status_size(wxSizeEvent& event);
+
     void on_ams_rack_switch(wxCommandEvent& event);
 #if BBL_ENABLE_AMS_CONTROL_WEB
     void on_ams_control_web_switch(wxCommandEvent& event);
