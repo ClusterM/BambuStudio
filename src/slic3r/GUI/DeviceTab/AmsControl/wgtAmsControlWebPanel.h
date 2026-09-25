@@ -22,6 +22,9 @@ public:
     void ShowAndLoad();
     void HideAndSuspend();
     void UpdateByMachine(Slic3r::MachineObject* obj);
+    // Width of the Control column box, DIP. The page stays at its 586 DIP
+    // layout and the WebView zoom fills this width.
+    void SetPanelWidth(int width_dip);
 
 private:
     DeviceWebHost* m_device_web{ nullptr };

@@ -56,6 +56,7 @@ public:
 public:
     void UpdateRackInfo(std::shared_ptr<DevNozzleRack> rack);
     void Rescale();
+    void SetRackWidthDip(int width_dip);
 
 private:
     void CreateGui();

@@ -1958,6 +1958,7 @@ StatusBasePanel::StatusBasePanel(wxWindow *parent, wxWindowID id, const wxPoint 
     obj = dev->get_selected_machine();
 
     init_bitmaps();
+    load_ctrl_box_width();
 
     this->SetBackgroundColour(wxColour(0xEE, 0xEE, 0xEE));
 
@@ -1998,9 +1999,14 @@ StatusBasePanel::StatusBasePanel(wxWindow *parent, wxWindowID id, const wxPoint 
 
     bSizer_status_below->Add(bSizer_left, 1, wxALL | wxEXPAND, 0);
 
-    auto m_panel_separator_middle = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE | wxTAB_TRAVERSAL);
+    m_panel_separator_middle = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE | wxTAB_TRAVERSAL);
     m_panel_separator_middle->SetBackgroundColour(STATUS_PANEL_BG);
     m_panel_separator_middle->SetMinSize(wxSize(PAGE_SPACING, -1));
+    m_panel_separator_middle->SetCursor(wxCURSOR_SIZEWE);
+    m_panel_separator_middle->Bind(wxEVT_LEFT_DOWN, &StatusBasePanel::on_ctrl_sash_down, this);
+    m_panel_separator_middle->Bind(wxEVT_MOTION, &StatusBasePanel::on_ctrl_sash_motion, this);
+    m_panel_separator_middle->Bind(wxEVT_LEFT_UP, &StatusBasePanel::on_ctrl_sash_up, this);
+    m_panel_separator_middle->Bind(wxEVT_MOUSE_CAPTURE_LOST, &StatusBasePanel::on_ctrl_sash_capture_lost, this);
 
     bSizer_status_below->Add(m_panel_separator_middle, 0, wxEXPAND | wxALL, 0);
 
@@ -2027,12 +2033,133 @@ StatusBasePanel::StatusBasePanel(wxWindow *parent, wxWindowID id, const wxPoint 
     bSizer_status->Add(m_panel_separotor_bottom, 0, wxEXPAND | wxALL, 0);
     this->SetSizerAndFit(bSizer_status);
     this->Layout();
+    Bind(wxEVT_SIZE, &StatusBasePanel::on_status_size, this);
+    apply_ctrl_box_width(m_ctrl_box_width_dip);
 }
 
 StatusBasePanel::~StatusBasePanel()
 {
     close_camera_fullscreen();
     delete m_media_play_ctrl;
+}
+
+void StatusBasePanel::load_ctrl_box_width()
+{
+    if (!wxGetApp().app_config)
+        return;
+    const std::string saved = wxGetApp().app_config->get("monitor_ctrl_panel_width");
+    if (saved.empty())
+        return;
+    try {
+        m_ctrl_box_width_dip = std::max(kCtrlBoxMinDip, std::stoi(saved));
+    } catch (const std::exception&) {
+        m_ctrl_box_width_dip = kCtrlBoxMinDip;
+    }
+}
+
+int StatusBasePanel::clamp_ctrl_box_width_dip(int width_dip) const
+{
+    width_dip = std::max(width_dip, kCtrlBoxMinDip);
+    const int client_w = GetClientSize().GetWidth();
+    if (client_w <= 0)
+        return width_dip;
+    // Leave the camera its minimum and the page gutters, or the scrolled
+    // window grows a horizontal bar.
+    const int max_panel_px = client_w - PAGE_MIN_WIDTH - 4 * PAGE_SPACING;
+    const int max_box_px = max_panel_px - 2 * FromDIP(kCtrlBoxSidePadDip);
+    if (max_box_px <= 0)
+        return kCtrlBoxMinDip;
+    const int max_dip = std::max(kCtrlBoxMinDip, ToDIP(max_box_px));
+    return std::min(width_dip, max_dip);
+}
+
+void StatusBasePanel::apply_ctrl_box_width(int width_dip)
+{
+    m_ctrl_box_width_dip = std::max(kCtrlBoxMinDip, width_dip);
+    const int applied = clamp_ctrl_box_width_dip(m_ctrl_box_width_dip);
+    if (applied == m_ctrl_box_applied_dip)
+        return;
+    m_ctrl_box_applied_dip = applied;
+    const int box_px = FromDIP(applied);
+
+    auto set_width = [&](wxWindow* window, int height_px) {
+        if (!window)
+            return;
+        window->SetMinSize(wxSize(box_px, height_px));
+        window->SetMaxSize(wxSize(box_px, height_px));
+    };
+    set_width(m_temp_axis_box, -1);
+    set_width(m_ams_control_box, -1);
+    set_width(m_scale_panel, FromDIP(40));
+    set_width(m_filament_load_box, -1);
+    if (m_panel_nozzle_rack)
+        m_panel_nozzle_rack->SetRackWidthDip(applied);
+#if BBL_ENABLE_AMS_CONTROL_WEB
+    if (m_ams_control_web_panel)
+        m_ams_control_web_panel->SetPanelWidth(applied);
+#endif
+    if (m_machine_ctrl_panel) {
+        const int panel_w = box_px + 2 * FromDIP(kCtrlBoxSidePadDip);
+        m_machine_ctrl_panel->SetMinSize(wxSize(panel_w, -1));
+        m_machine_ctrl_panel->SetMaxSize(wxSize(panel_w, -1));
+    }
+    Layout();
+}
+
+void StatusBasePanel::store_ctrl_box_width()
+{
+    if (!wxGetApp().app_config)
+        return;
+    wxGetApp().app_config->set("monitor_ctrl_panel_width", std::to_string(m_ctrl_box_width_dip));
+    wxGetApp().app_config->save();
+}
+
+void StatusBasePanel::on_ctrl_sash_down(wxMouseEvent& event)
+{
+    m_ctrl_sash_dragging = true;
+    m_ctrl_sash_start_x = wxGetMousePosition().x;
+    m_ctrl_sash_start_dip = m_ctrl_box_width_dip;
+    if (m_panel_separator_middle && !m_panel_separator_middle->HasCapture())
+        m_panel_separator_middle->CaptureMouse();
+    event.Skip();
+}
+
+void StatusBasePanel::on_ctrl_sash_motion(wxMouseEvent& event)
+{
+    if (!m_ctrl_sash_dragging) {
+        event.Skip();
+        return;
+    }
+    // Dragging left grows the Control column.
+    const int dx = m_ctrl_sash_start_x - wxGetMousePosition().x;
+    apply_ctrl_box_width(m_ctrl_sash_start_dip + ToDIP(dx));
+}
+
+void StatusBasePanel::on_ctrl_sash_up(wxMouseEvent& event)
+{
+    if (!m_ctrl_sash_dragging) {
+        event.Skip();
+        return;
+    }
+    m_ctrl_sash_dragging = false;
+    if (m_panel_separator_middle && m_panel_separator_middle->HasCapture())
+        m_panel_separator_middle->ReleaseMouse();
+    store_ctrl_box_width();
+    event.Skip();
+}
+
+void StatusBasePanel::on_ctrl_sash_capture_lost(wxMouseCaptureLostEvent&)
+{
+    m_ctrl_sash_dragging = false;
+    store_ctrl_box_width();
+}
+
+void StatusBasePanel::on_status_size(wxSizeEvent& event)
+{
+    event.Skip();
+    if (m_ctrl_sash_dragging)
+        return;
+    apply_ctrl_box_width(m_ctrl_box_width_dip);
 }
 
 bool StatusBasePanel::can_show_camera_fullscreen() const { return m_media_ctrl != nullptr && IsShownOnScreen(); }
@@ -2346,6 +2473,7 @@ wxBoxSizer *StatusBasePanel::create_temp_axis_group(wxWindow *parent)
 {
     auto sizer = new wxBoxSizer(wxVERTICAL);
     auto box   = new StaticBox(parent);
+    m_temp_axis_box = box;
 
     StateColor box_colour(std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
     StateColor box_border_colour(std::pair<wxColour, int>(STATUS_PANEL_BG, StateColor::Normal));
@@ -2354,8 +2482,8 @@ wxBoxSizer *StatusBasePanel::create_temp_axis_group(wxWindow *parent)
     box->SetBorderColor(box_border_colour);
     box->SetCornerRadius(5);
 
-    box->SetMinSize(wxSize(FromDIP(586), -1));
-    box->SetMaxSize(wxSize(FromDIP(586), -1));
+    box->SetMinSize(wxSize(FromDIP(m_ctrl_box_width_dip), -1));
+    box->SetMaxSize(wxSize(FromDIP(m_ctrl_box_width_dip), -1));
 
     wxBoxSizer *content_sizer = new wxBoxSizer(wxHORIZONTAL);
     wxBoxSizer *m_temp_ctrl   = create_temp_control(box);
@@ -2373,18 +2501,21 @@ wxBoxSizer *StatusBasePanel::create_temp_axis_group(wxWindow *parent)
     axis_and_bed_control_sizer->Add(m_axis_sizer, 0, wxEXPAND | wxALL, 0);
     axis_and_bed_control_sizer->Add(bedPanel, 0, wxALIGN_CENTER, 0);
 
-    content_sizer->Add(m_temp_ctrl, 0, wxEXPAND | wxALL, FromDIP(5));
-    content_sizer->Add(m_temp_temp_line, 0, wxEXPAND, 1);
-    content_sizer->Add(axis_and_bed_control_sizer, 1, wxALIGN_CENTER, 0);
+    content_sizer->AddStretchSpacer(1);
+    content_sizer->Add(m_temp_ctrl, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(5));
+    content_sizer->Add(m_temp_temp_line, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(8));
+    content_sizer->AddStretchSpacer(1);
+    content_sizer->Add(axis_and_bed_control_sizer, 0, wxALIGN_CENTER, 0);
+    content_sizer->AddStretchSpacer(1);
 
     m_temp_extruder_line = new wxPanel(box);
     m_temp_extruder_line->SetMaxSize(wxSize(FromDIP(1), -1));
     m_temp_extruder_line->SetMinSize(wxSize(FromDIP(1), -1));
     m_temp_extruder_line->SetBackgroundColour(STATIC_BOX_LINE_COL);
 
-    content_sizer->Add(m_temp_extruder_line, 0, wxEXPAND, 1);
+    content_sizer->Add(m_temp_extruder_line, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(8));
     content_sizer->Add(extruder_sizer, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(12));
-    content_sizer->Add(0, 0, 0, wxRIGHT, FromDIP(3));
+    content_sizer->AddStretchSpacer(1);
 
     box->SetSizer(content_sizer);
     sizer->Add(box, 0, wxEXPAND | wxALL, FromDIP(0));
@@ -2731,7 +2862,8 @@ StaticBox *StatusBasePanel::create_ams_group(wxWindow *parent)
     m_ams_control_box->SetBorderColor(box_border_colour);
     m_ams_control_box->SetCornerRadius(5);
 
-    m_ams_control_box->SetMinSize(wxSize(FromDIP(586), -1));
+    m_ams_control_box->SetMinSize(wxSize(FromDIP(m_ctrl_box_width_dip), -1));
+    m_ams_control_box->SetMaxSize(wxSize(FromDIP(m_ctrl_box_width_dip), -1));
     m_ams_control_box->SetBackgroundColour(*wxWHITE);
 
     m_ams_control = new AMSControl(m_ams_control_box, wxID_ANY);
@@ -2753,8 +2885,8 @@ wxBoxSizer *StatusBasePanel::create_filament_group(wxWindow *parent)
 
     auto sizer_scale_panel = new wxBoxSizer(wxHORIZONTAL);
     m_scale_panel          = new wxPanel(parent);
-    m_scale_panel->SetMinSize(wxSize(FromDIP(586), FromDIP(40)));
-    m_scale_panel->SetMaxSize(wxSize(FromDIP(586), FromDIP(40)));
+    m_scale_panel->SetMinSize(wxSize(FromDIP(m_ctrl_box_width_dip), FromDIP(40)));
+    m_scale_panel->SetMaxSize(wxSize(FromDIP(m_ctrl_box_width_dip), FromDIP(40)));
     m_scale_panel->SetBackgroundColour(*wxWHITE);
 
     auto m_title_filament_loading = new Label(m_scale_panel, _L("Filament loading..."));
@@ -2785,8 +2917,8 @@ wxBoxSizer *StatusBasePanel::create_filament_group(wxWindow *parent)
     m_filament_load_box->SetBackgroundColor(box_colour);
     m_filament_load_box->SetBorderColor(box_border_colour);
     m_filament_load_box->SetCornerRadius(5);
-    m_filament_load_box->SetMinSize(wxSize(FromDIP(586), -1));
-    m_filament_load_box->SetMaxSize(wxSize(FromDIP(586), -1));
+    m_filament_load_box->SetMinSize(wxSize(FromDIP(m_ctrl_box_width_dip), -1));
+    m_filament_load_box->SetMaxSize(wxSize(FromDIP(m_ctrl_box_width_dip), -1));
     m_filament_load_box->SetBackgroundColour(*wxWHITE);
     m_filament_load_box->SetSizer(sizer_box);
 

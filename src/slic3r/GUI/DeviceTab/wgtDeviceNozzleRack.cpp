@@ -114,6 +114,14 @@ void wgtDeviceNozzleRack::UpdateRackInfo(std::shared_ptr<DevNozzleRack> rack)
     }
 }
 
+void wgtDeviceNozzleRack::SetRackWidthDip(int width_dip)
+{
+    const wxSize size(FromDIP(width_dip), -1);
+    SetMinSize(size);
+    SetMaxSize(size);
+    Layout();
+}
+
 void wgtDeviceNozzleRack::Rescale()
 {
     m_toolhead_panel->Rescale();
