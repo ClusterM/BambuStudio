@@ -4204,17 +4204,10 @@ void StatusPanel::update_extruder_status(MachineObject *obj)
 
 void StatusPanel::update_calib_history(MachineObject *obj)
 {
-    if (!obj)
+    if (!obj || !obj->GetCalib())
         return;
 
-    if (obj->GetCalib()->IsVersionExpired() && obj->is_security_control_ready()) {
-        if (obj->GetCalib()->PrepareFetchQueue()) {
-            obj->GetCalib()->SyncCalibVersion();
-            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " calibration: rebuild history fetch queue for device " << BBLCrossTalk::Crosstalk_DevName(obj->get_dev_name());
-        }
-    }
-
-    obj->GetCalib()->SendNextFetch();
+    obj->GetCalib()->TickPAHistoryFetch();
 }
 
 static nlohmann::json build_ams_tray_batch_create(DevAmsTray* tray, const std::string& ams_id, MachineObject* obj);
