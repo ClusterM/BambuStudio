@@ -54,6 +54,8 @@
 #include "Notebook.hpp"
 #include "BitmapCache.hpp"
 #include "BindDialog.hpp"
+#include "MsgDialog.hpp"
+#include "CalibUtils.hpp"
 
 // definitions
 #define S_RACK_NOZZLE_OFFSET_CALI_WARNING _L(\
@@ -3183,11 +3185,284 @@ void SelectMachineDialog::Enable_Auto_Refill(bool enable)
     m_ams_backup_tip->Refresh();
 }
 
+bool SelectMachineDialog::apply_saved_pa_profiles(MachineObject* obj)
+{
+    if (!obj || !obj->GetCalib() || !obj->GetExtderSystem() || !obj->GetFilaSystem())
+        return true;
+
+    auto flow_it = m_checkbox_list.find("flow_cali");
+    if (flow_it == m_checkbox_list.end() || !flow_it->second || !flow_it->second->IsShown())
+        return true;
+    if (flow_it->second->getValue() != "off")
+        return true;
+    // Legacy firmware has no profile table and no extrusion_cali_sel.
+    if (!obj->GetCalib()->IsVersionInited())
+        return true;
+
+    struct PaSlotSelection {
+        int         ams_id{-1};
+        int         slot_id{-1};
+        int         tray_id{-1};
+        int         display_tray_id{-1};
+        std::string filament_id;
+        int         current_cali_idx{-1};
+        int         extruder_id{-1};
+        bool        extruder_conflict{false};
+        bool        extruder_unresolved{false};
+        float       nozzle_diameter{0.f};
+        int         cali_idx{-1};
+        bool        bambu{false};
+        bool        send_select{false};
+        bool        warn{false};
+        wxString    label;
+    };
+
+    // filament_map is 1-based logical (1 = left, 2 = right). physical_extruder_map
+    // lives on the printer preset, not project_config: logical 0 → physical id.
+    auto physical_extruder = [this](int filament_idx) -> int {
+        if (filament_idx < 0 || !wxGetApp().preset_bundle)
+            return -1;
+
+        int map_value = 0;
+        if (filament_idx < (int) m_filaments_map.size()) {
+            map_value = m_filaments_map[filament_idx];
+        } else if (m_print_type == FROM_NORMAL && m_plater) {
+            PartPlate* plate = m_plater->get_partplate_list().get_curr_plate();
+            if (!plate)
+                return -1;
+            const auto maps = plate->get_real_filament_maps(wxGetApp().preset_bundle->project_config);
+            if (filament_idx >= (int) maps.size())
+                return -1;
+            map_value = maps[filament_idx];
+        } else {
+            return -1;
+        }
+        const int logical = map_value - 1;
+        if (logical < 0)
+            return -1;
+
+        const ConfigOptionInts* phys = wxGetApp().preset_bundle->printers.get_edited_preset().config.option<ConfigOptionInts>("physical_extruder_map");
+        if (!phys)
+            phys = wxGetApp().preset_bundle->printers.get_selected_preset().config.option<ConfigOptionInts>("physical_extruder_map");
+        if (!phys && m_print_type == FROM_SDCARD_VIEW && m_print_plate_idx >= 0 && m_print_plate_idx < (int) m_required_data_plate_data_list.size() &&
+            m_required_data_plate_data_list[m_print_plate_idx]) {
+            phys = m_required_data_plate_data_list[m_print_plate_idx]->config.option<ConfigOptionInts>("physical_extruder_map");
+        }
+        if (!phys || logical >= (int) phys->values.size())
+            return -1;
+        return phys->values[logical];
+    };
+
+    std::vector<PaSlotSelection> slots;
+    for (const FilamentInfo& info : m_ams_mapping_result) {
+        if (info.ams_id.empty() || info.slot_id.empty())
+            continue;
+        const int ams_id  = info.get_ams_id();
+        const int slot_id = info.get_slot_id();
+        if (ams_id < 0 || slot_id < 0)
+            continue;
+        // filament_map 0 means this filament is not assigned to an extruder.
+        if (info.id >= 0 && info.id < (int) m_filaments_map.size() && m_filaments_map[info.id] == 0)
+            continue;
+
+        const auto tray_opt = obj->get_tray(info.ams_id, info.slot_id);
+        if (!tray_opt.has_value())
+            continue;
+        const std::string filament_id = tray_opt->get_filament_id();
+        if (filament_id.empty())
+            continue;
+        // RFID tag_uid is often "0" until the tag is read, so also match the preset vendor.
+        // Bambu filaments are still matched. A missing profile selects the factory default without a warning.
+        bool bambu_filament = DevFilaSystem::IsBBL_Filament(tray_opt->tag_uid);
+        if (!bambu_filament && wxGetApp().preset_bundle) {
+            if (auto preset = wxGetApp().preset_bundle->get_filament_by_filament_id(filament_id))
+                bambu_filament = preset->vendor == "Bambu Lab";
+        }
+        if (!bambu_filament && filament_id.rfind("GF", 0) == 0)
+            bambu_filament = true;
+
+        int slot_index = -1;
+        for (int i = 0; i < (int) slots.size(); ++i) {
+            if (slots[i].ams_id == ams_id && slots[i].slot_id == slot_id) {
+                slot_index = i;
+                break;
+            }
+        }
+        if (slot_index < 0) {
+            PaSlotSelection created;
+            created.ams_id          = ams_id;
+            created.slot_id         = slot_id;
+            created.tray_id         = obj->GetFilaSystem()->GetTrayIdByAmsSlotId(ams_id, slot_id);
+            created.display_tray_id = info.tray_id >= 0 ? info.tray_id : created.tray_id;
+            if (created.tray_id < 0)
+                created.tray_id = info.tray_id;
+            created.filament_id      = filament_id;
+            created.current_cali_idx = tray_opt->cali_idx;
+            created.bambu            = bambu_filament;
+
+            wxString filament_name;
+            if (wxGetApp().preset_bundle) {
+                if (auto preset = wxGetApp().preset_bundle->get_filament_by_filament_id(filament_id)) {
+                    if (!preset->filament_name.empty())
+                        filament_name = wxString::FromUTF8(preset->filament_name);
+                }
+            }
+            if (filament_name.empty())
+                filament_name = wxString::FromUTF8(tray_opt->get_display_filament_type());
+            if (filament_name.empty())
+                filament_name = wxString::FromUTF8(filament_id);
+            const wxString slot_name = wxGetApp().transition_tridid(created.display_tray_id, obj->GetExtderSystem()->GetTotalExtderCount());
+            created.label            = filament_name + " (" + slot_name + ")";
+
+            slots.push_back(std::move(created));
+            slot_index = (int) slots.size() - 1;
+        }
+
+        int physical = physical_extruder(info.id);
+        if (physical < 0 && !obj->is_multi_extruders())
+            physical = MAIN_EXTRUDER_ID;
+        BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: filament " << info.id
+                                << " map=" << (info.id >= 0 && info.id < (int) m_filaments_map.size() ? m_filaments_map[info.id] : -1)
+                                << " physical_extruder=" << physical
+                                << " ams=" << ams_id << " slot=" << slot_id;
+
+        PaSlotSelection& slot = slots[slot_index];
+        if (physical < 0) {
+            slot.extruder_unresolved = true;
+        } else if (slot.extruder_id < 0) {
+            slot.extruder_id     = physical;
+            slot.nozzle_diameter = obj->GetExtderSystem()->GetNozzleDiameter(physical);
+        } else if (slot.extruder_id != physical) {
+            slot.extruder_conflict = true;
+        }
+    }
+
+    if (slots.empty())
+        return true;
+
+    // An empty cache must not be treated as "no profile" — that would write cali_idx -1.
+    if (!obj->GetCalib()->IsPAHistoryReady()) {
+        MessageDialog dlg(this,
+                          _L("Flow Dynamics Calibration profiles are still loading from the printer. Wait a moment and send the print job again."),
+                          _L("Warning"), wxOK | wxICON_WARNING);
+        dlg.ShowModal();
+        return false;
+    }
+
+    auto use_default = [](PaSlotSelection& slot, const char* reason) {
+        slot.cali_idx    = -1;
+        slot.send_select = true;
+        // Bambu filaments fall back to the factory profile without a dialog.
+        if (slot.bambu) {
+            BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: Bambu slot default (" << reason
+                                    << ") ams=" << slot.ams_id << " slot=" << slot.slot_id
+                                    << " filament=" << slot.filament_id;
+            return;
+        }
+        slot.warn = true;
+    };
+
+    for (PaSlotSelection& slot : slots) {
+        if (slot.extruder_conflict || slot.extruder_unresolved || slot.extruder_id < 0) {
+            if (slot.nozzle_diameter <= 0.f)
+                slot.nozzle_diameter = obj->GetExtderSystem()->GetNozzleDiameter(MAIN_EXTRUDER_ID);
+            BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: no single extruder for ams=" << slot.ams_id
+                                    << " slot=" << slot.slot_id << " filament=" << slot.filament_id;
+            use_default(slot, "no single extruder");
+            continue;
+        }
+
+        const NozzleDiameterType dia  = obj->GetExtderSystem()->GetNozzleDiameterType(slot.extruder_id);
+        const NozzleFlowType     flow = obj->GetExtderSystem()->GetNozzleFlowType(slot.extruder_id);
+        if (dia == NozzleDiameterType::NONE_DIAMETER_TYPE) {
+            BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: unknown nozzle diameter, extruder=" << slot.extruder_id;
+            use_default(slot, "unknown nozzle");
+            continue;
+        }
+
+        PaHistoryFilter filter = obj->GetCalib()->GetPaHistoryFilter();
+        filter.set_filament_id(slot.filament_id)
+            .set_nozzle_diameter(dia)
+            .set_extruder_id(obj->is_multi_extruders() ? std::optional<int>(slot.extruder_id) : std::nullopt)
+            .set_nozzle_volume_type(flow == NozzleFlowType::NONE_FLOWTYPE ? std::nullopt
+                                                                          : std::optional<NozzleVolumeType>(DevNozzle::ToNozzleVolumeType(flow)));
+
+        const std::vector<PACalibResult> matched = filter.get();
+        if (matched.empty()) {
+            BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: no profile for filament=" << slot.filament_id
+                                    << " extruder=" << slot.extruder_id;
+            use_default(slot, "no profile");
+            continue;
+        }
+
+        const PACalibResult* chosen = nullptr;
+        if (matched.size() == 1) {
+            chosen = &matched[0];
+        } else {
+            auto current = std::find_if(matched.begin(), matched.end(), [&](const PACalibResult& result) {
+                return result.cali_idx == slot.current_cali_idx;
+            });
+            if (current != matched.end())
+                chosen = &(*current);
+            else
+                chosen = &(*std::max_element(matched.begin(), matched.end(), [](const PACalibResult& left, const PACalibResult& right) {
+                    return left.cali_idx < right.cali_idx;
+                }));
+        }
+        slot.cali_idx    = chosen->cali_idx;
+        slot.send_select = true;
+        if (!chosen->filament_id.empty())
+            slot.filament_id = chosen->filament_id;
+        if (chosen->nozzle_diameter > 0.f)
+            slot.nozzle_diameter = chosen->nozzle_diameter;
+    }
+
+    wxString missing;
+    for (const PaSlotSelection& slot : slots) {
+        if (!slot.warn)
+            continue;
+        if (!missing.empty())
+            missing += "\n";
+        missing += "- " + slot.label;
+    }
+    if (!missing.empty()) {
+        const wxString msg = wxString::Format(
+            _L("No saved Flow Dynamics Calibration profile matches the filament, nozzle, and extruder for:\n\n%s\n\nThese slots will use the default profile. Continue sending the print job?"),
+            missing);
+        MessageDialog dlg(this, msg, _L("Warning"), wxOK | wxCANCEL | wxICON_WARNING);
+        dlg.SetButtonLabel(wxID_OK, _L("Continue"));
+        dlg.Layout();
+        dlg.Fit();
+        dlg.CenterOnParent();
+        if (dlg.ShowModal() != wxID_OK)
+            return false;
+    }
+
+    for (const PaSlotSelection& slot : slots) {
+        if (!slot.send_select)
+            continue;
+        if (slot.tray_id < 0) {
+            BOOST_LOG_TRIVIAL(warning) << "apply_saved_pa_profiles: skip sel, invalid tray ams=" << slot.ams_id << " slot=" << slot.slot_id;
+            continue;
+        }
+        PACalibIndexInfo select_info;
+        select_info.tray_id         = slot.tray_id;
+        select_info.ams_id          = slot.ams_id;
+        select_info.slot_id         = slot.slot_id;
+        select_info.cali_idx        = slot.cali_idx;
+        select_info.filament_id     = slot.filament_id;
+        select_info.nozzle_diameter = slot.nozzle_diameter;
+        CalibUtils::select_PA_calib_result(select_info);
+        BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: sel ams=" << slot.ams_id << " slot=" << slot.slot_id
+                                << " tray=" << slot.tray_id << " cali_idx=" << slot.cali_idx << " filament=" << slot.filament_id
+                                << " extruder=" << slot.extruder_id;
+    }
+    return true;
+}
+
 void SelectMachineDialog::on_send_print()
 {
     BOOST_LOG_TRIVIAL(info) << "print_job: on_ok to send";
-    m_is_canceled = false;
-    Enable_Send_Button(false);
 
     if (m_mapping_popup.IsShown())
         m_mapping_popup.Dismiss();
@@ -3212,6 +3487,13 @@ void SelectMachineDialog::on_send_print()
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << "print_job: invalid mapping";
         return;
     }
+
+    // Confirm and select stored PA profiles before the send button is disabled.
+    if (!apply_saved_pa_profiles(obj_))
+        return;
+
+    m_is_canceled = false;
+    Enable_Send_Button(false);
 
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ", print_job: for send task, current printer id =  " << BBLCrossTalk::Crosstalk_DevId(m_printer_last_select) << std::endl;
     show_status(PrintDialogStatus::PrintStatusSending);

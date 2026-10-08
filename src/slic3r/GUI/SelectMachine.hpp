@@ -524,6 +524,9 @@ public:
     void on_reselect_dialog_btn_clicked(wxMouseEvent&);
     void Enable_Auto_Refill(bool enable);
     void on_send_print();
+    // When Flow Dynamics Calibration is Off, select a stored PA profile for each
+    // mapped non-Bambu slot. Returns false when sending must stop.
+    bool apply_saved_pa_profiles(MachineObject* obj);
     void clear_ip_address_config(wxCommandEvent& e);
     void on_refresh(wxCommandEvent& event);
     void on_set_finish_mapping(wxCommandEvent& evt);
