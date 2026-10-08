@@ -18,6 +18,7 @@
 #include <boost/log/trivial.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace Slic3r { namespace GUI {
 
@@ -140,6 +141,7 @@ void DeviceWebHost::EnsureBuilt()
     m_device_webview = new PrinterWebView(
         this, ViewNameForMode(m_mode), WebViewProtectionMode::DeviceHost);
     m_device_webview->SetMinSize(wxSize(FromDIP(320), FromDIP(260)));
+    ApplyAmsControlWebZoom();
     if (auto *webview = m_device_webview->GetWebView())
         webview->Bind(EVT_WEBVIEW_RECOVERY, &DeviceWebHost::OnWebViewRecovery, this);
     m_device_web_bridge = std::make_unique<DeviceWebBridge>(
@@ -592,9 +594,39 @@ void DeviceWebHost::NotifyAmsControlWebChanged()
     m_device_web_mgr->NotifyState("device_page_ams_control_web", "state", "changed");
 }
 
-// Locked host width (DIP) of the StatusPanel-embedded AmsControlWeb panel. The
-// page is laid out width:100%, so its reported width only echoes the container.
-static constexpr int kAmsControlWebWidthDip = 586;
+// Unzoomed layout width (DIP) of the AMS web page. The host grows with the
+// Control column and WebKit zoom fills the extra width.
+static constexpr int kAmsControlWebBaseWidthDip = 586;
+
+void DeviceWebHost::SetAmsControlWebWidthDip(int width_dip)
+{
+    if (m_mode != DeviceWebHostMode::DevicePageAmsControlWeb)
+        return;
+    if (width_dip < kAmsControlWebBaseWidthDip)
+        width_dip = kAmsControlWebBaseWidthDip;
+    m_ams_web_width_dip = width_dip;
+    int height = m_last_logical_content_size.GetHeight();
+    if (height <= 0)
+        height = 340;
+    ApplyAmsControlWebHostSize(height);
+}
+
+void DeviceWebHost::ApplyAmsControlWebZoom()
+{
+    if (m_mode != DeviceWebHostMode::DevicePageAmsControlWeb)
+        return;
+    auto* wv = GetWebView();
+    if (!wv)
+        return;
+    // SetZoomFactor is cleared by the widget resize that follows it, so the
+    // page stays at 1x until the next device refresh (about a second). CSS zoom
+    // is written into the live document after that resize.
+    const float zoom = static_cast<float>(m_ams_web_width_dip) /
+                       static_cast<float>(kAmsControlWebBaseWidthDip);
+    const int milli = static_cast<int>(std::lround(zoom * 1000.f));
+    wv->RunScript(wxString::Format(
+        "document.documentElement.style.zoom='%d.%03d';", milli / 1000, milli % 1000));
+}
 
 void DeviceWebHost::ApplyAmsControlWebHostSize(int height_dip)
 {
@@ -602,10 +634,16 @@ void DeviceWebHost::ApplyAmsControlWebHostSize(int height_dip)
     constexpr int kMaxHeightDip = 360;
     height_dip = std::clamp(height_dip, kMinHeightDip, kMaxHeightDip);
 
-    m_last_logical_content_size = wxSize(kAmsControlWebWidthDip, height_dip);
-    wxSize content_size(FromDIP(kAmsControlWebWidthDip), FromDIP(height_dip));
+    // Host width follows the resizable Control column; the page keeps its 578 DIP
+    // layout and is zoomed to fill it, so tanks and text grow proportionally.
+    const float zoom = static_cast<float>(m_ams_web_width_dip) /
+                       static_cast<float>(kAmsControlWebBaseWidthDip);
+    m_last_logical_content_size = wxSize(m_ams_web_width_dip, height_dip);
+    wxSize content_size(FromDIP(m_ams_web_width_dip),
+                        FromDIP(static_cast<int>(std::lround(height_dip * zoom))));
 
-    if (m_last_reported_content_size != wxDefaultSize) {
+    if (m_last_reported_content_size.GetWidth() == content_size.GetWidth() &&
+        m_last_reported_content_size != wxDefaultSize) {
         const int jitter = FromDIP(8);
         const int dh = content_size.GetHeight() - m_last_reported_content_size.GetHeight();
         if (dh > -jitter && dh < jitter)
@@ -631,6 +669,7 @@ void DeviceWebHost::ApplyAmsControlWebHostSize(int height_dip)
         parent->Layout();
         parent->SendSizeEvent();
     }
+    ApplyAmsControlWebZoom();
 }
 
 void DeviceWebHost::OnWebContentSizeChanged(int width, int height)

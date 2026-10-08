@@ -60,6 +60,8 @@ public:
 
     void on_sys_color_changed();
     void msw_rescale();
+    // StatusPanel Control column width, DIP. Only DevicePageAmsControlWeb uses it.
+    void SetAmsControlWebWidthDip(int width_dip);
 
     wxWebView* GetWebView() const {
         if (m_device_webview) return m_device_webview->GetWebView();
@@ -70,6 +72,7 @@ private:
     wxString BuildUrl(const std::string& path) const;
     void OnWebContentSizeChanged(int width, int height);
     void ApplyAmsControlWebHostSize(int height_dip);
+    void ApplyAmsControlWebZoom();
     void OnWebViewRecovery(wxCommandEvent &event);
     void OnHostShown(wxShowEvent &event);
     void OnAppActivated(wxActivateEvent &event);
@@ -109,6 +112,9 @@ private:
     // Last web-reported size in DPI-independent CSS pixels (before FromDIP()).
     // Used to rebuild the physical min size at the current DPI on show.
     wxSize                            m_last_logical_content_size{ wxDefaultSize };
+    // Host width of the AMS web panel. The page layout stays at the base width
+    // and WebKit zoom scales it to fill this.
+    int                               m_ams_web_width_dip{ 586 };
     std::deque<std::int64_t>          m_renderer_recoveries;
     std::deque<std::int64_t>          m_browser_recoveries;
     std::deque<std::int64_t>          m_ready_recoveries;
