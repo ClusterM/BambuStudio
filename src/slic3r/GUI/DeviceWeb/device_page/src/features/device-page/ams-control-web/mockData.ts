@@ -101,6 +101,7 @@ function slotView(
     show_remain: showRemain,
     show_remain_height: false,
     fila_type: unknown ? '' : item.fila_type,
+    info_lines: unknown || !item.fila_type ? [] : [item.fila_type],
     selected: item.ams_id === selected.amsId && item.slot_id === selected.slotId,
     loaded: item.ams_id === loaded.amsId && item.slot_id === loaded.slotId,
     reading: item.reading,

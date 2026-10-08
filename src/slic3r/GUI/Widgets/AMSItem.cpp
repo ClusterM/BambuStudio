@@ -1,4 +1,5 @@
 #include "AMSItem.hpp"
+#include "DotMatrixDisplay.hpp"
 #include "Label.hpp"
 #include "../BitmapCache.hpp"
 #include "../I18N.hpp"
@@ -15,6 +16,10 @@
 
 #include <wx/simplebook.h>
 #include <wx/dcgraph.h>
+#include <wx/graphics.h>
+#include <algorithm>
+#include <cstring>
+#include <vector>
 
 #include <boost/log/trivial.hpp>
 
@@ -33,6 +38,46 @@ static DevFilaColorType wire_ctype_to_color_type(int ctype)
     case 1:  return DevFilaColorType::CTYPE_MULTI;
     default: return DevFilaColorType::CTYPE_SINGLE;
     }
+}
+
+// Top edge of the remain fill, including the same corner radius as the
+// rounded blob — not a chord sitting above it. Stock grey (130,129,128).
+static void draw_remain_top_edge(wxDC& dc, const wxRect& fill, int radius, int pen_w)
+{
+    if (fill.width <= 0 || fill.height <= 0 || pen_w <= 0)
+        return;
+
+    int r = std::max(1, radius);
+    r = std::min(r, fill.width / 2);
+    r = std::min(r, fill.height);
+
+    const wxColour gray(130, 129, 128);
+    wxPen pen(gray, pen_w, wxPENSTYLE_SOLID);
+    pen.SetCap(wxCAP_ROUND);
+    pen.SetJoin(wxJOIN_ROUND);
+
+    const double x = fill.x;
+    const double y = fill.y;
+    const double w = fill.width;
+
+    // wx 3.1 has no Create(wxDC&). Use the GC already attached to wxGCDC
+    // (Windows paint path); otherwise the same contour via wxDC primitives.
+    if (wxGraphicsContext* gc = dc.GetGraphicsContext()) {
+        gc->SetPen(pen);
+        wxGraphicsPath path = gc->CreatePath();
+        path.MoveToPoint(x, y + r);
+        path.AddArcToPoint(x, y, x + r, y, r);
+        path.AddLineToPoint(x + w - r, y);
+        path.AddArcToPoint(x + w, y, x + w, y + r, r);
+        gc->StrokePath(path);
+        return;
+    }
+
+    dc.SetPen(pen);
+    dc.SetBrush(*wxTRANSPARENT_BRUSH);
+    dc.DrawEllipticArc(fill.x, fill.y, 2 * r, 2 * r, 90, 180);
+    dc.DrawLine(fill.x + r, fill.y, fill.x + fill.width - r, fill.y);
+    dc.DrawEllipticArc(fill.x + fill.width - 2 * r, fill.y, 2 * r, 2 * r, 0, 90);
 }
 
     static const wxColour AMS_TRAY_DEFAULT_COL = wxColour(255, 255, 255);
@@ -58,8 +103,13 @@ static DevFilaColorType wire_ctype_to_color_type(int ctype)
 #define AMS_CANS_SIZE wxSize(FromDIP(284), -1)
 //#define AMS_CANS_WINDOW_SIZE wxSize(FromDIP(264), 144)
 //#define AMS_SINGLE_CAN_SIZE wxSize(FromDIP(78), 144)
-#define AMS_CANS_WINDOW_SIZE wxSize(FromDIP(264), FromDIP(174))
-#define AMS_SINGLE_CAN_SIZE wxSize(FromDIP(78), FromDIP(174))
+// Heights include the dot-matrix display + edit icon row under every tank.
+#define AMS_CANS_WINDOW_SIZE wxSize(FromDIP(264), FromDIP(174) + AMS_LIB_EXTRA_H)
+#define AMS_SINGLE_CAN_SIZE wxSize(FromDIP(78), FromDIP(174) + AMS_LIB_EXTRA_H)
+// AMS Lite: two rows of slots, each row grows by the display/icon stack plus the
+// 8 px the tank used to overflow its 72 px cell.
+#define AMS_LITE_CAN_CELL_SIZE wxSize(FromDIP(80), AMS_LIB_TANK_H + AMS_LIB_EXTRA_H)
+#define AMS_LITE_CANS_WINDOW_SIZE wxSize(FromDIP(78), FromDIP(174) + 2 * (AMS_LIB_EXTRA_H + FromDIP(8)))
 bool AMSinfo::parse_ams_info(MachineObject *obj, DevAms *ams, bool remain_flag, bool humidity_flag)
 {
     if (!ams) return false;
@@ -1040,14 +1090,14 @@ void AMSLib::on_leave_window(wxMouseEvent &evt)
 
 void AMSLib::on_left_down(wxMouseEvent &evt)
 {
-    // Check click on new-filament hint icon (top-right corner) first.
+    const wxPoint pos = evt.GetPosition();
+
+    // Check click on new-filament hint icon (top-right corner of the tank) first.
     if (m_show_new_filament_hint) {
-        auto size     = GetSize();
-        auto pos      = evt.GetPosition();
-        auto hint_sz  = m_bitmap_new_filament_hint.GetBmpSize();
-        int  icon_x   = size.x - hint_sz.x;
-        int  icon_y   = 0;
-        if (pos.x >= icon_x && pos.x <= icon_x + hint_sz.x && pos.y >= icon_y && pos.y <= icon_y + hint_sz.y) {
+        const wxRect tank    = tank_rect();
+        const wxSize hint_sz = m_bitmap_new_filament_hint.GetBmpSize();
+        const wxRect hint_r(tank.GetRight() + 1 - hint_sz.x, tank.y, hint_sz.x, hint_sz.y);
+        if (hint_r.Contains(pos)) {
             wxCommandEvent hint_evt(EVT_AMS_NEW_FILAMENT_HINT);
             hint_evt.SetInt(std::stoi(m_ams_id));
             hint_evt.SetString(m_slot_id);
@@ -1056,40 +1106,59 @@ void AMSLib::on_left_down(wxMouseEvent &evt)
         }
     }
 
-    if (m_info.material_state != AMSCanType::AMS_CAN_TYPE_EMPTY && m_info.material_state != AMSCanType::AMS_CAN_TYPE_NONE) {
-        auto size = GetSize();
-        auto pos  = evt.GetPosition();
-        if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND || m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND ||
-            m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL) {
-
-            auto left = FromDIP(10);
-            auto right = size.x - FromDIP(10);
-            auto top = 0;
-            auto bottom = 0;
-
-            if (m_ams_model == DevAmsType::AMS || m_ams_model == DevAmsType::N3F || m_ams_model == DevAmsType::N3S || m_ams_model == DevAmsType::EXT_SPOOL) {
-                top = (size.y - FromDIP(15) - m_bitmap_editable_light.GetBmpSize().y);
-                bottom = size.y - FromDIP(15);
-            }
-            else if (m_ams_model == DevAmsType::AMS_LITE) {
-                top = (size.y - FromDIP(20) - m_bitmap_editable_light.GetBmpSize().y);
-                bottom = size.y - FromDIP(20);
-            }
-
-            if (pos.x >= left && pos.x <= right && pos.y >= top && pos.y <= bottom) {
-                if (m_selected) {
-                    if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL) {
-                        post_event(wxCommandEvent(EVT_VAMS_ON_FILAMENT_EDIT));
-                    }
-                    else {
-                        post_event(wxCommandEvent(EVT_AMS_ON_FILAMENT_EDIT));
-                    }
-                } else {
-                    BOOST_LOG_TRIVIAL(trace) << "current amslib is not selected";
+    // The dot-matrix display and the edit icon under it both open the editor.
+    if (is_editable_state() && !m_disable_mode) {
+        wxRect edit_r = display_rect();
+        edit_r.Union(icon_rect());
+        if (edit_r.Contains(pos)) {
+            if (m_selected) {
+                if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL) {
+                    post_event(wxCommandEvent(EVT_VAMS_ON_FILAMENT_EDIT));
                 }
+                else {
+                    post_event(wxCommandEvent(EVT_AMS_ON_FILAMENT_EDIT));
+                }
+            } else {
+                BOOST_LOG_TRIVIAL(trace) << "current amslib is not selected";
             }
         }
     }
+}
+
+bool AMSLib::is_editable_state() const
+{
+    return m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND
+        || m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND
+        || m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL;
+}
+
+bool AMSLib::display_on_top() const
+{
+    // AMS Lite grid: slots 0 and 3 form the upper row and feed downwards,
+    // so their display/icon stack sits above the tank, away from the road.
+    return m_ams_model == DevAmsType::AMS_LITE && (m_can_index == 0 || m_can_index == 3);
+}
+
+wxRect AMSLib::tank_rect() const
+{
+    const wxSize size = GetSize();
+    const int    y    = display_on_top() ? AMS_LIB_EXTRA_H : 0;
+    return wxRect(0, y, size.x, AMS_LIB_TANK_H);
+}
+
+wxRect AMSLib::display_rect() const
+{
+    const wxSize size = GetSize();
+    const int    y    = display_on_top() ? AMS_LIB_ICON_H + AMS_LIB_DISPLAY_GAP
+                                         : AMS_LIB_TANK_H + AMS_LIB_DISPLAY_GAP;
+    return wxRect(FromDIP(1), y, size.x - FromDIP(2), AMS_LIB_DISPLAY_H);
+}
+
+wxRect AMSLib::icon_rect() const
+{
+    const wxSize size = GetSize();
+    const int    y    = display_on_top() ? 0 : AMS_LIB_TANK_H + AMS_LIB_DISPLAY_GAP + AMS_LIB_DISPLAY_H + AMS_LIB_DISPLAY_GAP;
+    return wxRect(0, y, size.x, AMS_LIB_ICON_H);
 }
 
 
@@ -1119,116 +1188,31 @@ void AMSLib::render(wxDC &dc)
     doRender(dc);
 #endif
 
-    // text
-    if (m_ams_model == DevAmsType::AMS_LITE || (m_ams_model == DevAmsType::EXT_SPOOL && m_ext_type == AMSModelOriginType::LITE_EXT)) {
-        render_lite_text(dc);
-    }
-    else{
-        render_generic_text(dc);
-    }
+    // Filament type / K value on the dot-matrix panel, edit icon on its own row.
+    render_display(dc);
+    render_edit_icon(dc);
 }
 
-void AMSLib::render_lite_text(wxDC& dc)
+// Decide whether a K value can be shown for this slot (mirrors the legacy
+// label logic). May pull default K/N from presets into m_info.
+void AMSLib::compute_k_display(bool& show_k, bool& k_loading)
 {
-    auto tmp_lib_colour = m_info.material_colour;
-
-    change_the_opacity(tmp_lib_colour);
-    auto temp_text_colour = AMS_CONTROL_GRAY800;
-
-    if (tmp_lib_colour.GetLuminance() < 0.6) {
-        temp_text_colour = AMS_CONTROL_WHITE_COLOUR;
-    }
-    else {
-        temp_text_colour = AMS_CONTROL_GRAY800;
-    }
-
-    if (m_info.material_remain < 50) {
-        temp_text_colour = AMS_CONTROL_GRAY800;
-    }
-
-    if (tmp_lib_colour.Alpha() == 0) {
-        temp_text_colour = AMS_CONTROL_GRAY800;
-    }
-
-    dc.SetFont(::Label::Body_13);
-    dc.SetTextForeground(temp_text_colour);
-
-    auto libsize = GetSize();
-    if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND
-        || m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND
-        || m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL) {
-
-        if (m_info.material_name.empty()) {
-            auto tsize = dc.GetMultiLineTextExtent("?");
-            auto pot = wxPoint(0, 0);
-            pot = wxPoint((libsize.x - tsize.x) / 2 + FromDIP(2), (libsize.y - tsize.y) / 2 - FromDIP(5));
-            dc.DrawText(L("?"), pot);
-        }
-        else {
-            auto tsize = dc.GetMultiLineTextExtent(m_info.material_name);
-            std::vector<std::string> split_char_arr = { " ", "-" };
-            bool has_split = false;
-            std::string has_split_char = " ";
-
-            for (std::string split_char : split_char_arr) {
-                if (m_info.material_name.find(split_char) != std::string::npos) {
-                    has_split = true;
-                    has_split_char = split_char;
-                }
-            }
-
-            if (has_split) {
-                dc.SetFont(::Label::Body_10);
-                auto line_top = m_info.material_name.substr(0, m_info.material_name.find(has_split_char));
-                auto line_bottom = m_info.material_name.substr(m_info.material_name.find(has_split_char));
-
-                auto line_top_tsize = dc.GetMultiLineTextExtent(line_top);
-                auto line_bottom_tsize = dc.GetMultiLineTextExtent(line_bottom);
-
-                auto pot_top = wxPoint((libsize.x - line_top_tsize.x) / 2 + FromDIP(3), (libsize.y - line_top_tsize.y) / 2 - line_top_tsize.y);
-                dc.DrawText(line_top, pot_top);
-
-                auto pot_bottom = wxPoint((libsize.x - line_bottom_tsize.x) / 2 + FromDIP(3), (libsize.y - line_bottom_tsize.y) / 2);
-                dc.DrawText(line_bottom, pot_bottom);
-
-
-            }
-            else {
-                dc.SetFont(::Label::Body_10);
-                auto pot = wxPoint(0, 0);
-                if (m_obj ) {
-                    pot = wxPoint((libsize.x - tsize.x) / 2 + FromDIP(6), (libsize.y - tsize.y) / 2 - FromDIP(5));
-                }
-                dc.DrawText(m_info.material_name, pot);
-            }
-        }
-    }
-
-    if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_EMPTY) {
-        auto tsize = dc.GetMultiLineTextExtent(_L("/"));
-        auto pot = wxPoint((libsize.x - tsize.x) / 2 + FromDIP(2), (libsize.y - tsize.y) / 2 + FromDIP(3));
-        dc.DrawText(_L("/"), pot);
-    }
-}
-
-void AMSLib::render_generic_text(wxDC &dc)
-{
-    bool show_k_value = true;
-    bool k_loading    = false;
+    show_k    = true;
+    k_loading = false;
     if (m_info.material_name.empty()) {
-        show_k_value = false;
+        show_k = false;
     }
     else if (m_info.cali_idx == -1 || (m_obj && (CalibUtils::get_selected_calib_idx(m_obj->GetCalib()->GetPAHistory(), m_info.cali_idx) == -1))) {
         if (m_obj && m_obj->GetConfig() && m_obj->GetConfig()->SupportCalibrationPA_FlowAuto()) {
-            show_k_value = false;
+            show_k = false;
         }
         else if (m_info.cali_idx == -1) {
             // user selected default, hide k value
-            show_k_value = false;
+            show_k = false;
         }
         else if (m_obj && !m_obj->GetCalib()->IsPAHistoryReady()) {
             // PA history not loaded yet (e.g. after machine switch), show loading
-            show_k_value = false;
+            show_k    = false;
             k_loading = true;
         }
         else {
@@ -1236,162 +1220,95 @@ void AMSLib::render_generic_text(wxDC &dc)
         }
     }
     else if (abs(m_info.k) < EPSILON) {
-        show_k_value = false;
+        show_k = false;
     }
+}
 
+void AMSLib::render_display(wxDC& dc)
+{
+    const wxRect area = display_rect();
+    if (area.width <= 0 || area.height <= 0)
+        return;
+
+    std::array<wxString, DM_ROWS> lines;
     wxString tooltip_text;
 
-    auto tmp_lib_colour = m_info.material_colour;
-    change_the_opacity(tmp_lib_colour);
+    if (is_editable_state()) {
+        bool show_k = false, k_loading = false;
+        compute_k_display(show_k, k_loading);
 
-    auto temp_text_colour = AMS_CONTROL_GRAY800;
+        lines[0] = m_info.material_name.empty() ? wxString("?") : wxString(m_info.material_name);
+        tooltip_text += m_info.material_name;
 
-    if (tmp_lib_colour.GetLuminance() < 0.6) {
-        temp_text_colour = AMS_CONTROL_WHITE_COLOUR;
-    }
-    else {
-        temp_text_colour = AMS_CONTROL_GRAY800;
-    }
-
-    if (m_info.material_remain < 50) {
-        temp_text_colour = AMS_CONTROL_GRAY800;
-    }
-
-    if (tmp_lib_colour.Alpha() == 0) {
-        temp_text_colour = AMS_CONTROL_GRAY800;
-    }
-
-    dc.SetFont(::Label::Body_13);
-    dc.SetTextForeground(temp_text_colour);
-    auto alpha = m_info.material_colour.Alpha();
-    if (alpha != 0 && alpha != 255 && alpha != 254) {
-        dc.SetTextForeground(*wxBLACK);
-    }
-
-    auto libsize = GetSize();
-    if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND
-        || m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND
-        || m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL) {
-
-        if (m_info.material_name.empty() /*&&  m_info.material_state != AMSCanType::AMS_CAN_TYPE_VIRTUAL*/) {
-            auto tsize = dc.GetMultiLineTextExtent("?");
-            auto pot = wxPoint(0, 0);
-
-            if (m_obj && show_k_value) {
-                pot = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 - FromDIP(9));
+        if (m_show_kn && m_obj) {
+            if (show_k) {
+                lines[1] = wxString::Format("K %1.3f", m_info.k);
+                tooltip_text += "\n" + lines[1];
             }
-            else {
-                pot = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 + FromDIP(3));
-            }
-            dc.DrawText(L("?"), pot);
-
-        }
-        else {
-            auto tsize = dc.GetMultiLineTextExtent(m_info.material_name);
-            std::vector<std::string> split_char_arr = { " ", "-" };
-            bool has_split = false;
-            std::string has_split_char = " ";
-
-            for (std::string split_char : split_char_arr) {
-                if (m_info.material_name.find(split_char) != std::string::npos) {
-                    has_split = true;
-                    has_split_char = split_char;
-                }
-            }
-
-
-            if (has_split) {
-                dc.SetFont(::Label::Body_12);
-
-                auto line_top = m_info.material_name.substr(0, m_info.material_name.find(has_split_char));
-                auto line_bottom = m_info.material_name.substr(m_info.material_name.find(has_split_char));
-
-                auto line_top_tsize = dc.GetMultiLineTextExtent(line_top);
-                auto line_bottom_tsize = dc.GetMultiLineTextExtent(line_bottom);
-
-                if (!m_show_kn) {
-                    auto pot_top = wxPoint((libsize.x - line_top_tsize.x) / 2, (libsize.y - line_top_tsize.y) / 2 - line_top_tsize.y + FromDIP(6));
-                    dc.DrawText(line_top, pot_top);
-
-
-                    auto pot_bottom = wxPoint((libsize.x - line_bottom_tsize.x) / 2, (libsize.y - line_bottom_tsize.y) / 2 + FromDIP(4));
-                    dc.DrawText(line_bottom, pot_bottom);
-                }
-                else {
-                    auto pot_top = wxPoint((libsize.x - line_top_tsize.x) / 2, (libsize.y - line_top_tsize.y) / 2 - line_top_tsize.y - FromDIP(6));
-                    dc.DrawText(line_top, pot_top);
-
-                    auto pot_bottom = wxPoint((libsize.x - line_bottom_tsize.x) / 2, (libsize.y - line_bottom_tsize.y) / 2 - FromDIP(8));
-                    dc.DrawText(line_bottom, pot_bottom);
-                }
-
-
-            }
-            else {
-                auto pot = wxPoint(0, 0);
-                if (m_obj && k_loading) {
-                    pot = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 - FromDIP(22));
-                } else if (m_obj && show_k_value) {
-                    pot = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 - FromDIP(9));
-                } else {
-                    pot = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 + FromDIP(3));
-                }
-                dc.DrawText(m_info.material_name, pot);
-            }
-            tooltip_text += m_info.material_name;
-        }
-
-        //draw k&n
-        if (m_obj && show_k_value) {
-            if (m_show_kn) {
-                wxString str_k = wxString::Format("K %1.3f", m_info.k);
-                wxString str_n = wxString::Format("N %1.3f", m_info.n);
-                dc.SetFont(::Label::Body_11);
-                auto tsize = dc.GetMultiLineTextExtent(str_k);
-                auto pot_k = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 - FromDIP(9) + tsize.y);
-                dc.DrawText(str_k, pot_k);
-
-                tooltip_text += "\n" + str_k;
+            else if (k_loading) {
+                lines[1] = "K ....";
+                tooltip_text += "\nK " + _CTX(L_CONTEXT("loading", "AMS filament"), "AMS filament");
             }
         }
-        else if (m_obj && k_loading && m_show_kn) {
-            wxString str_k     = wxString::Format("K %1.3f", m_info.k);
-            wxString str_line1 = "K";
-            wxString str_line2 = _CTX(L_CONTEXT("loading", "AMS filament"), "AMS filament");
-            dc.SetFont(::Label::Body_11);
-            auto tsize_k     = dc.GetMultiLineTextExtent(str_k);
-            auto tsize_line1 = dc.GetMultiLineTextExtent(str_line1);
-            auto tsize_line2 = dc.GetMultiLineTextExtent(str_line2);
-            int  y_text      = (libsize.y - tsize_k.y) / 2 - FromDIP(20) + tsize_k.y;
-            dc.DrawText(str_line1, wxPoint((libsize.x - tsize_line1.x) / 2, y_text));
-            dc.DrawText(str_line2, wxPoint((libsize.x - tsize_line2.x) / 2, y_text + tsize_line1.y));
-            tooltip_text += "\n" + str_line1 + " " + str_line2;
-        }
-        if (GetToolTipText() != tooltip_text) {
-            SetToolTip(tooltip_text);
-        }
+    }
+    else if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_EMPTY) {
+        lines[0] = "EMPTY";
+    }
+    // AMS_CAN_TYPE_NONE: blank panel.
+
+    if (GetToolTipText() != tooltip_text) {
+        SetToolTip(tooltip_text);
     }
 
-    if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_EMPTY) {
-        auto tsize = dc.GetMultiLineTextExtent(_L("Empty"));
-        auto pot = wxPoint((libsize.x - tsize.x) / 2, (libsize.y - tsize.y) / 2 + FromDIP(3));
-        dc.DrawText(_L("Empty"), pot);
+    const wxColour bg  = GetBackgroundColour();
+    const wxString key = wxString::Format("%s|%s|%dx%d|%s", lines[0], lines[1], area.width, area.height, bg.GetAsString(wxC2S_HTML_SYNTAX));
+    if (!m_display_bmp.IsOk() || key != m_display_cache_key) {
+        m_display_bmp       = render_dot_matrix(area.GetSize(), lines, bg);
+        m_display_cache_key = key;
     }
+    if (m_display_bmp.IsOk())
+        dc.DrawBitmap(m_display_bmp, area.x, area.y, false);
+}
+
+void AMSLib::render_edit_icon(wxDC& dc)
+{
+    if (m_disable_mode || !is_editable_state())
+        return;
+
+    // The icon row sits on the plain widget background, so pick the variant
+    // by that colour (dark mode) instead of by the filament colour.
+    const bool     light_bg = GetBackgroundColour().GetLuminance() >= 0.6;
+    const bool     readonly = m_view_only || m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND;
+    ScalableBitmap& icon    = readonly ? (light_bg ? m_bitmap_readonly : m_bitmap_readonly_light)
+                                       : (light_bg ? m_bitmap_editable : m_bitmap_editable_light);
+
+    const wxRect r  = icon_rect();
+    const wxSize sz = icon.GetBmpSize();
+    dc.DrawBitmap(icon.bmp(), r.x + (r.width - sz.x) / 2, r.y + (r.height - sz.y) / 2, true);
 }
 
 void AMSLib::doRender(wxDC &dc)
 {
+    // Tank renderers work in tank-local coordinates (0,0 = tank top-left).
+    // Clip to the tank: the remain fill is a rounded rect whose bottom used to
+    // spill 1 px past the widget and get clipped. AMSLib is now taller, so
+    // that sliver would otherwise show between the tank and the display.
+    const wxRect tank = tank_rect();
+    dc.SetClippingRegion(tank);
+    dc.SetDeviceOrigin(tank.x, tank.y);
     if (m_ams_model == DevAmsType::AMS_LITE || m_ext_type == AMSModelOriginType::LITE_EXT) {
         render_lite_lib(dc);
     }
     else {
         render_generic_lib(dc);
     }
+    dc.SetDeviceOrigin(0, 0);
+    dc.DestroyClippingRegion();
 }
 
 void AMSLib::render_lite_lib(wxDC& dc)
 {
-    wxSize size = GetSize();
+    const wxSize size = tank_rect().GetSize();
     auto libsize = AMS_LITE_CAN_LIB_SIZE;
 
     const AMSCanType cur_state_lite = m_info.material_state;
@@ -1414,9 +1331,6 @@ void AMSLib::render_lite_lib(wxDC& dc)
     auto   tmp_lib_colour    = m_info.material_colour;
     change_the_opacity(tmp_lib_colour);
 
-    auto   temp_bitmap_third = m_bitmap_editable_light;
-    auto   temp_bitmap_brand = m_bitmap_readonly_light;
-
     //draw road
 
 
@@ -1428,7 +1342,10 @@ void AMSLib::render_lite_lib(wxDC& dc)
     }
 
     if (m_can_index == 0 || m_can_index == 3) {
-        dc.DrawLine(size.x / 2, size.y / 2, size.x / 2, size.y);
+        // Down to the bottom of the whole widget (tank-local coordinates), so a
+        // Lite external spool stays connected to the road part drawn below it.
+        const int road_end = GetSize().y - tank_rect().y;
+        dc.DrawLine(size.x / 2, size.y / 2, size.x / 2, road_end);
     }
     else {
         dc.DrawLine(size.x / 2, size.y / 2, size.x / 2, 0);
@@ -1442,34 +1359,12 @@ void AMSLib::render_lite_lib(wxDC& dc)
     }
     dc.DrawRoundedRectangle(FromDIP(10), FromDIP(10), libsize.x - FromDIP(20), libsize.y - FromDIP(20), 0);
 
-    if (tmp_lib_colour.GetLuminance() < 0.6) {
-        temp_bitmap_third = m_bitmap_editable_light;
-        temp_bitmap_brand = m_bitmap_readonly_light;
-    }
-    else {
-        temp_bitmap_third = m_bitmap_editable;
-        temp_bitmap_brand = m_bitmap_readonly;
-    }
-
-    if (m_info.material_remain < 50) {
-        temp_bitmap_third = m_bitmap_editable;
-        temp_bitmap_brand = m_bitmap_readonly;
-    }
-
     if (tmp_lib_colour.Alpha() == 0) {
-        temp_bitmap_third = m_bitmap_editable;
-        temp_bitmap_brand = m_bitmap_readonly;
-
         if (m_ams_model == DevAmsType::EXT_SPOOL) {
             dc.DrawBitmap(m_bitmap_transparent_lite.bmp(), FromDIP(8), (size.y - libsize.y) / 2 + FromDIP(8));
         } else {
             dc.DrawBitmap(m_bitmap_transparent_lite.bmp(), FromDIP(10), (size.y - libsize.y) / 2 + FromDIP(8));
         }
-    }
-
-    // View-only mode forces the read-only (eye) icon even for third-party spools.
-    if (m_view_only) {
-        temp_bitmap_third = temp_bitmap_brand;
     }
 
     dc.SetPen(wxPen(*wxTRANSPARENT_PEN));
@@ -1514,16 +1409,6 @@ void AMSLib::render_lite_lib(wxDC& dc)
     }
     dc.SetPen(wxPen(*wxTRANSPARENT_PEN));
     dc.SetBrush(wxBrush(tmp_lib_colour));
-    if (!m_disable_mode) {
-        // edit icon
-        if (m_info.material_state != AMSCanType::AMS_CAN_TYPE_EMPTY && m_info.material_state != AMSCanType::AMS_CAN_TYPE_NONE)
-        {
-            if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND || m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL)
-                dc.DrawBitmap(temp_bitmap_third.bmp(), (size.x - temp_bitmap_third.GetBmpSize().x) / 2 + FromDIP(2), (size.y - FromDIP(18) - temp_bitmap_third.GetBmpSize().y));
-            if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND)
-                dc.DrawBitmap(temp_bitmap_brand.bmp(), (size.x - temp_bitmap_brand.GetBmpSize().x) / 2 + FromDIP(2), (size.y - FromDIP(18) - temp_bitmap_brand.GetBmpSize().y));
-        }
-    }
 
     // selected & hover
     if (m_selected) {
@@ -1552,41 +1437,14 @@ void AMSLib::render_generic_lib(wxDC &dc)
         m_show_new_filament_hint = false;
     }
 
-    wxSize size = GetSize();
+    const wxSize size = tank_rect().GetSize();
     auto   tmp_lib_colour = m_info.material_colour;
     change_the_opacity(tmp_lib_colour);
-
-    auto   temp_bitmap_third = m_bitmap_editable_light;
-    auto   temp_bitmap_brand = m_bitmap_readonly_light;
 
     //draw def background
     dc.SetPen(wxPen(*wxTRANSPARENT_PEN));
     dc.SetBrush(wxBrush(AMS_CONTROL_DEF_LIB_BK_COLOUR));
     dc.DrawRoundedRectangle(FromDIP(2), FromDIP(2), size.x - FromDIP(4), size.y - FromDIP(3), m_radius);
-
-    if (tmp_lib_colour.GetLuminance() < 0.6) {
-        temp_bitmap_third = m_bitmap_editable_light;
-        temp_bitmap_brand = m_bitmap_readonly_light;
-    }
-    else {
-        temp_bitmap_third = m_bitmap_editable;
-        temp_bitmap_brand = m_bitmap_readonly;
-    }
-
-    if (m_info.material_remain < 50) {
-        temp_bitmap_third = m_bitmap_editable;
-        temp_bitmap_brand = m_bitmap_readonly;
-    }
-
-    if (tmp_lib_colour.Alpha() == 0) {
-        temp_bitmap_third = m_bitmap_editable;
-        temp_bitmap_brand = m_bitmap_readonly;
-    }
-
-    // View-only mode forces the read-only (eye) icon even for third-party spools.
-    if (m_view_only) {
-        temp_bitmap_third = temp_bitmap_brand;
-    }
 
     dc.SetPen(wxPen(tmp_lib_colour, 1, wxPENSTYLE_SOLID));
     dc.SetBrush(wxBrush(tmp_lib_colour));
@@ -1635,16 +1493,6 @@ void AMSLib::render_generic_lib(wxDC &dc)
                 transparent_changed = false;
             }
             dc.DrawBitmap(m_bitmap_transparent_blend, FromDIP(2), FromDIP(2));
-        }
-
-        if (!m_disable_mode) {
-            // edit icon
-            if (m_info.material_state != AMSCanType::AMS_CAN_TYPE_EMPTY && m_info.material_state != AMSCanType::AMS_CAN_TYPE_NONE) {
-                if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND || m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL)
-                    dc.DrawBitmap(temp_bitmap_third.bmp(), (size.x - temp_bitmap_third.GetBmpSize().x) / 2, (size.y - FromDIP(10) - temp_bitmap_third.GetBmpSize().y));
-                if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND)
-                    dc.DrawBitmap(temp_bitmap_brand.bmp(), (size.x - temp_bitmap_brand.GetBmpSize().x) / 2, (size.y - FromDIP(10) - temp_bitmap_brand.GetBmpSize().y));
-            }
         }
 
         dc.SetPen(wxPen(wxColour(130, 130, 128), 1, wxPENSTYLE_SOLID));
@@ -1756,48 +1604,26 @@ void AMSLib::render_generic_lib(wxDC &dc)
         else {
             auto brush = dc.GetBrush();
             if (alpha != 0 && alpha != 255 && alpha != 254) dc.SetBrush(wxBrush(*wxTRANSPARENT_BRUSH));
-            dc.DrawRoundedRectangle(FromDIP(2), FromDIP(1) + top, size.x - FromDIP(4), curr_height, m_radius - 1);
+            // y is FromDIP(1) to sit under the border; shrink height by the same
+            // so the rounded bottom does not poke out under the tank.
+            const int fill_h = std::max(FromDIP(1), curr_height - FromDIP(1));
+            dc.DrawRoundedRectangle(FromDIP(2), FromDIP(1) + top, size.x - FromDIP(4), fill_h, m_radius - 1);
             dc.SetBrush(brush);
         }
     }
 
-    if (top > 2) {
-        if (curr_height >= FromDIP(1)) {
-            //dc.DrawLine(FromDIP(2), top, size.x - FromDIP(4), top);
-            if (alpha != 255 && alpha != 254) {
-                dc.SetPen(wxPen(*wxWHITE));
-                dc.SetBrush(wxBrush(*wxWHITE));
+    if (top > 2 && curr_height >= FromDIP(1)) {
+        if (alpha != 255 && alpha != 254) {
+            dc.SetPen(wxPen(*wxWHITE));
+            dc.SetBrush(wxBrush(*wxWHITE));
 #ifdef __APPLE__
-                dc.DrawRoundedRectangle(FromDIP(2), FromDIP(1) , size.x - FromDIP(4), top, m_radius);
+            dc.DrawRoundedRectangle(FromDIP(2), FromDIP(1), size.x - FromDIP(4), top, m_radius);
 #else
-                dc.DrawRoundedRectangle(FromDIP(2), FromDIP(1) , size.x - FromDIP(4), top, m_radius - 1);
-#endif
-            }
-            if (tmp_lib_colour.Red() > 238 && tmp_lib_colour.Green() > 238 && tmp_lib_colour.Blue() > 238) {
-                dc.SetPen(wxPen(wxColour(130, 129, 128), 1, wxPENSTYLE_SOLID));
-                dc.SetBrush(wxBrush(*wxTRANSPARENT_BRUSH));
-                if (m_info.material_cols.size() <= 1){
-                    dc.DrawLine(FromDIP(2), top, size.x - FromDIP(4), top);
-                }
-            }
-        }
-        else {
-            dc.SetBrush(wxBrush(*wxTRANSPARENT_BRUSH));
-            if (tmp_lib_colour.Red() > 238 && tmp_lib_colour.Green() > 238 && tmp_lib_colour.Blue() > 238) {
-                dc.SetPen(wxPen(wxColour(130, 129, 128), 2, wxPENSTYLE_SOLID));
-            }
-            else {
-                dc.SetPen(wxPen(tmp_lib_colour, 2, wxPENSTYLE_SOLID));
-            }
-
-#ifdef __APPLE__
-            dc.DrawLine(FromDIP(5), FromDIP(4) + height - FromDIP(2), size.x - FromDIP(5), FromDIP(4) + height - FromDIP(2));
-            dc.DrawLine(FromDIP(6), FromDIP(4) + height - FromDIP(1), size.x - FromDIP(6), FromDIP(4) + height - FromDIP(1));
-#else
-            //dc.DrawLine(FromDIP(2), FromDIP(0 + height), FromDIP(size.x - 4), FromDIP(height));
-            dc.DrawLine(FromDIP(2), height - FromDIP(1), size.x - FromDIP(4), height - FromDIP(1));
+            dc.DrawRoundedRectangle(FromDIP(2), FromDIP(1), size.x - FromDIP(4), top, m_radius - 1);
 #endif
         }
+        const wxRect fill_rect(FromDIP(2), FromDIP(1) + top, size.x - FromDIP(4), curr_height);
+        draw_remain_top_edge(dc, fill_rect, m_radius - 1, 2);
     }
 
     //border
@@ -1835,17 +1661,6 @@ void AMSLib::render_generic_lib(wxDC &dc)
 #endif
         dc.SetPen(wxPen(*wxTRANSPARENT_PEN));
         dc.SetBrush(wxBrush(tmp_lib_colour));
-    }
-
-    if (!m_disable_mode) {
-        // edit icon
-        if (m_info.material_state != AMSCanType::AMS_CAN_TYPE_EMPTY && m_info.material_state != AMSCanType::AMS_CAN_TYPE_NONE)
-        {
-            if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_THIRDBRAND || m_info.material_state == AMSCanType::AMS_CAN_TYPE_VIRTUAL)
-                dc.DrawBitmap(temp_bitmap_third.bmp(), (size.x - temp_bitmap_third.GetBmpSize().x) / 2, (size.y - FromDIP(10) - temp_bitmap_third.GetBmpSize().y));
-            if (m_info.material_state == AMSCanType::AMS_CAN_TYPE_BRAND)
-                dc.DrawBitmap(temp_bitmap_brand.bmp(), (size.x - temp_bitmap_brand.GetBmpSize().x) / 2, (size.y - FromDIP(10) - temp_bitmap_brand.GetBmpSize().y));
-        }
     }
 
     // new official filament hint icon (top-right corner)
@@ -1936,6 +1751,10 @@ void AMSLib::msw_rescale()
     m_bitmap_extra_tray_left_selected = ScalableBitmap(this, "extra_ams_tray_left_selected", 72);
     m_bitmap_extra_tray_right_selected = ScalableBitmap(this, "extra_ams_tray_right_selected", 72);
     m_bitmap_extra_tray_mid_selected = ScalableBitmap(this, "extra_ams_tray_mid_selected", 72);
+
+    // Display bitmap depends on pixel size; force re-render.
+    m_display_cache_key.clear();
+    m_display_bmp = wxBitmap();
 
     Layout();
     Refresh();
@@ -3426,6 +3245,12 @@ AmsItem::AmsItem(wxWindow *parent,AMSinfo info,  DevAmsType model, AMSPanelPos p
         SetMinSize(AMS_CANS_WINDOW_SIZE);
         SetMaxSize(AMS_CANS_WINDOW_SIZE);
     }
+    else if (m_ams_model == DevAmsType::AMS_LITE){
+        wxWindow::Create(parent, wxID_ANY, wxDefaultPosition, AMS_LITE_CANS_WINDOW_SIZE);
+        SetSize(AMS_LITE_CANS_WINDOW_SIZE);
+        SetMinSize(AMS_LITE_CANS_WINDOW_SIZE);
+        SetMaxSize(AMS_LITE_CANS_WINDOW_SIZE);
+    }
     else{
         wxWindow::Create(parent, wxID_ANY, wxDefaultPosition, AMS_SINGLE_CAN_SIZE);
         SetSize(AMS_SINGLE_CAN_SIZE);
@@ -3516,8 +3341,8 @@ void AmsItem::AddCan(Caninfo caninfo, int canindex, int maxcan, wxBoxSizer* size
 {
     auto        amscan = new wxWindow(this, wxID_ANY);
 
-    amscan->SetSize(wxSize(FromDIP(52), FromDIP(109)));
-    amscan->SetMinSize(wxSize(FromDIP(52), FromDIP(109)));
+    amscan->SetSize(wxSize(FromDIP(52), FromDIP(109) + AMS_LIB_EXTRA_H));
+    amscan->SetMinSize(wxSize(FromDIP(52), FromDIP(109) + AMS_LIB_EXTRA_H));
 
     amscan->SetBackgroundColour(StateColor::darkModeColorFor(AMS_CONTROL_DEF_LIB_BK_COLOUR));
     //amscan->SetBackgroundColour(wxTRANSPARENT);
@@ -3607,15 +3432,20 @@ void AmsItem::AddLiteCan(Caninfo caninfo, int canindex, wxGridSizer* sizer)
     /*amscan->SetSize(wxSize(FromDIP(49), FromDIP(72)));
     amscan->SetMinSize(wxSize(FromDIP(49), FromDIP(72)));
     amscan->SetMaxSize(wxSize(FromDIP(49), FromDIP(72)));*/
-    amscan->SetSize(wxSize(FromDIP(80), FromDIP(72)));
-    amscan->SetMinSize(wxSize(FromDIP(80), FromDIP(72)));
-    amscan->SetMaxSize(wxSize(FromDIP(80), FromDIP(72)));
+    amscan->SetSize(AMS_LITE_CAN_CELL_SIZE);
+    amscan->SetMinSize(AMS_LITE_CAN_CELL_SIZE);
+    amscan->SetMaxSize(AMS_LITE_CAN_CELL_SIZE);
 
     amscan->SetBackgroundColour(StateColor::darkModeColorFor(AMS_CONTROL_DEF_LIB_BK_COLOUR));
 
     wxBoxSizer* m_sizer_ams = new wxBoxSizer(wxHORIZONTAL);
 
     auto m_panel_lib = new AMSLib(amscan, m_info.ams_id, caninfo);
+    // Upper row (slots 0/3) stacks icon+display above the tank, lower row below it;
+    // keep the refresh button vertically centred on the tank, not on the whole cell.
+    const bool upper_row      = (canindex == 0 || canindex == 3);
+    const int  refresh_border = (AMS_LIB_TANK_H - AMS_REFRESH_SIZE.y) / 2;
+    const int  refresh_flags  = upper_row ? (wxALIGN_BOTTOM | wxBOTTOM) : (wxALIGN_TOP | wxTOP);
 
     m_panel_lib->Bind(wxEVT_LEFT_DOWN, [this, canindex](wxMouseEvent& ev) {
         m_canlib_selection = canindex;
@@ -3646,7 +3476,7 @@ void AmsItem::AddLiteCan(Caninfo caninfo, int canindex, wxGridSizer* sizer)
 
     //auto m_panel_road = new AMSRoad(amscan, wxID_ANY, caninfo, canindex, maxcan, wxDefaultPosition, AMS_CAN_ROAD_SIZE);
     if (caninfo.can_id == "0" || caninfo.can_id == "1") {
-        m_sizer_ams->Add(ams_refresh, 0, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 0);
+        m_sizer_ams->Add(ams_refresh, 0, wxALIGN_LEFT | refresh_flags, refresh_border);
     }
     switch (canindex){
     case 0:
@@ -3665,7 +3495,7 @@ void AmsItem::AddLiteCan(Caninfo caninfo, int canindex, wxGridSizer* sizer)
         break;
     }
     if (caninfo.can_id == "2" || caninfo.can_id == "3") {
-        m_sizer_ams->Add(ams_refresh, 0, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL, 0);
+        m_sizer_ams->Add(ams_refresh, 0, wxALIGN_RIGHT | refresh_flags, refresh_border);
     }
     amscan->SetSizer(m_sizer_ams);
     amscan->Layout();
@@ -3970,6 +3800,10 @@ void AmsItem::RenderLiteRoad(wxDC& dc, wxSize size) {
         end_top = 0;
     }
     auto passroad_width = 4;
+    // Road stubs start inside the tanks (hidden under the AMSLib windows);
+    // keep them relative to the centre so the layout can grow symmetrically.
+    const int upper_start = size.y / 2 - FromDIP(57);
+    const int lower_start = size.y / 2 + FromDIP(73);
     auto a1_top = m_panel_pos == AMSPanelPos::RIGHT_PANEL ? size.y / 2 - FromDIP(4) : size.y / 2;
     auto a2_top = m_panel_pos == AMSPanelPos::RIGHT_PANEL ? size.y / 2 : size.y / 2 - FromDIP(4);
     auto a3_top = m_panel_pos == AMSPanelPos::RIGHT_PANEL ? size.y / 2 + FromDIP(8) : size.y / 2 + FromDIP(4);
@@ -3989,21 +3823,21 @@ void AmsItem::RenderLiteRoad(wxDC& dc, wxSize size) {
         auto a1_left = m_can_lib_list["0"]->GetScreenPosition().x + m_can_lib_list["0"]->GetSize().x / 2;
         auto local_pos1 = GetScreenPosition().x + GetSize().x / 2;
         a1_left = size.x / 2 + (a1_left - local_pos1);
-        dc.DrawLine(a1_left, FromDIP(30), a1_left, a1_top);
+        dc.DrawLine(a1_left, upper_start, a1_left, a1_top);
         dc.DrawLine(a1_left, a1_top, end_top, a1_top);
 
         // A2
         auto a2_left = m_can_lib_list["3"]->GetScreenPosition().x + m_can_lib_list["3"]->GetSize().x / 2;
         auto local_pos2 = GetScreenPosition().x + GetSize().x / 2;
         a2_left = size.x / 2 + (a2_left - local_pos2);
-        dc.DrawLine(a2_left, FromDIP(30), a2_left, a2_top);
+        dc.DrawLine(a2_left, upper_start, a2_left, a2_top);
         dc.DrawLine(a2_left, a2_top, end_top, a2_top);
 
         // A3
         auto a3_left = m_can_lib_list["1"]->GetScreenPosition().x + m_can_lib_list["1"]->GetSize().x / 2;
         auto local_pos3 = GetScreenPosition().x + GetSize().x / 2;
         a3_left = size.x / 2 + (a3_left - local_pos3);
-        dc.DrawLine(a3_left, FromDIP(160), a3_left, a3_top);
+        dc.DrawLine(a3_left, lower_start, a3_left, a3_top);
         dc.DrawLine(a3_left, a3_top, end_top, a3_top);
 
 
@@ -4011,7 +3845,7 @@ void AmsItem::RenderLiteRoad(wxDC& dc, wxSize size) {
         auto a4_left = m_can_lib_list["2"]->GetScreenPosition().x + m_can_lib_list["2"]->GetSize().x / 2;
         auto local_pos4 = GetScreenPosition().x + GetSize().x / 2;
         a4_left = size.x / 2 + (a4_left - local_pos4);
-        dc.DrawLine(a4_left, FromDIP(160), a4_left, a4_top);
+        dc.DrawLine(a4_left, lower_start, a4_left, a4_top);
         dc.DrawLine(a4_left, a4_top, end_top, a4_top);
 
         //to Extruder
@@ -4029,25 +3863,25 @@ void AmsItem::RenderLiteRoad(wxDC& dc, wxSize size) {
             m_road_colour = m_info.cans[can_idx].material_colour;
             dc.SetPen(wxPen(m_road_colour, passroad_width, wxPENSTYLE_SOLID));
             if (m_road_canid == "0") {
-                dc.DrawLine(a1_left, FromDIP(30), a1_left, a1_top);
+                dc.DrawLine(a1_left, upper_start, a1_left, a1_top);
                 dc.DrawLine(a1_left, a1_top, end_top, a1_top);
                 dc.DrawLine(end_top, a1_top, end_top, size.y);
             }
 
             if (m_road_canid == "3") {
-                dc.DrawLine(a2_left, FromDIP(30), a2_left, a2_top);
+                dc.DrawLine(a2_left, upper_start, a2_left, a2_top);
                 dc.DrawLine(a2_left, a2_top, end_top, a2_top);
                 dc.DrawLine(end_top, a2_top, end_top, size.y);
             }
 
             if (m_road_canid == "1") {
-                dc.DrawLine(a3_left, FromDIP(160), a3_left, a3_top);
+                dc.DrawLine(a3_left, lower_start, a3_left, a3_top);
                 dc.DrawLine(a3_left, a3_top, end_top, a3_top);
                 dc.DrawLine(end_top, a3_top, end_top, size.y);
             }
 
             if (m_road_canid == "2") {
-                dc.DrawLine(a4_left, FromDIP(160), a4_left, a4_top);
+                dc.DrawLine(a4_left, lower_start, a4_left, a4_top);
                 dc.DrawLine(a4_left, a4_top, end_top, a4_top);
                 dc.DrawLine(end_top, a4_top, end_top, size.y);
             }
