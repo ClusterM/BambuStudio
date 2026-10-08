@@ -2,6 +2,7 @@
 
 #include "wgtFilaManagerCloudClient.h"
 #include "wgtFilaManagerCloudSync.h"
+#include "wgtFilaManagerFeature.h"
 #include "wgtFilaManagerStore.h"
 
 #include "slic3r/GUI/GUI_App.hpp"
@@ -199,7 +200,7 @@ void wgtFilaManagerCloudDispatcher::run_pull_op()
         on_op_done();
         return;
     }
-    if (!is_user_logged_in()) {
+    if (!is_spoolman_enabled() && !is_user_logged_in()) {
         BOOST_LOG_TRIVIAL(info) << "[CloudDispatcher] pull skipped: not logged in";
         on_op_done();
         return;
