@@ -4,6 +4,7 @@
 #include <iterator>
 #include <set>
 #include "slic3r/GUI/GUI_App.hpp"
+#include "slic3r/Utils/BBLUtil.hpp"
 
 #include "slic3r/GUI/UserNotification.hpp"
 #include "slic3r/Utils/CalibUtils.hpp"
@@ -357,6 +358,42 @@ void DevCalib::SendNextFetch()
     }
 }
 
+void DevCalib::TickPAHistoryFetch()
+{
+    MachineObject *obj = GetOwner();
+    if (!obj)
+        return;
+
+    if (IsVersionExpired() && obj->is_security_control_ready()) {
+        if (PrepareFetchQueue()) {
+            SyncCalibVersion();
+            BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " calibration: rebuild history fetch queue for device "
+                                    << BBLCrossTalk::Crosstalk_DevName(obj->get_dev_name());
+        }
+    }
+
+    SendNextFetch();
+}
+
+void DevCalib::SchedulePAHistoryFetch()
+{
+    if (m_pa_fetch_scheduled)
+        return;
+    const bool pending = IsVersionExpired() || (!IsFetchQueueEmpty() && IsFetchIdle());
+    if (!pending)
+        return;
+
+    m_pa_fetch_scheduled = true;
+    MachineObject *owner = m_owner;
+    GUI::wxGetApp().CallAfter([owner] {
+        if (!owner || !owner->GetCalib())
+            return;
+        DevCalib *calib = owner->GetCalib();
+        calib->m_pa_fetch_scheduled = false;
+        calib->TickPAHistoryFetch();
+    });
+}
+
 void DevCalib::ResetPAHistory()
 {
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " clear tab=" << m_pa_calib_tab.size() << " queue=" << m_fetch_queue.size();
@@ -506,7 +543,8 @@ void DevCalib::ExtrusionCalibGetTableParse(const json &jj){
         BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << " pop queue remain=" << m_fetch_queue.size() << " status=" << static_cast<int>(GetPAHistoryStatus());
         if (GetPAHistoryStatus() == CalibStatus::WAITING)
             m_pa_table_status = CalibStatus::IDLE;
-        // notify cali history to update
+        // Continue the queue without waiting for the Device tab timer.
+        SchedulePAHistoryFetch();
     }
 }
 
