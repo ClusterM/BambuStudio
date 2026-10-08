@@ -6430,9 +6430,14 @@ bool SelectMachineDialog::CheckWarningFilamentRemain(MachineObject* obj_)
     // Step 1: skip when remain detection is off, not a normal send-print, or AMS cannot report accurate remain.
     if (!obj_) return true;
 
-    if (!obj_->GetFilaSystem()->IsDetectRemainEnabled() || m_print_type != PrintFromType::FROM_NORMAL) return true;
+    if (m_print_type != PrintFromType::FROM_NORMAL) return true;
 
-    if (!IsAllAmsSupportAccurateRemain(obj_)) return true;
+    // Official path: AMS firmware RemainEstimateVersion::Accurate (O1D U4)
+    // plus the "detect remain" setting. That flag is not a quality rating of
+    // the grams — only "printer can estimate Bambu RFID". Spoolman overlay
+    // already wrote remain_g and is treated as known weight regardless.
+    const bool official_accurate = obj_->GetFilaSystem()->IsDetectRemainEnabled()
+        && IsAllAmsSupportAccurateRemain(obj_);
 
     auto full_config = wxGetApp().preset_bundle->full_config();
     auto filament_densities = full_config.option<ConfigOptionFloats>("filament_density");
@@ -6443,20 +6448,29 @@ bool SelectMachineDialog::CheckWarningFilamentRemain(MachineObject* obj_)
     std::map<std::pair<std::string, std::string>, std::vector<int>> fila_ids_in_slot; // all filament ids mapped to the same slot
 
     // Step 2: collect remaining weight for every AMS slot that reports remain data.
+    auto add_remain = [&](const std::string& ams_id, const std::string& slot_id, const DevAmsTray& tray) {
+        if (tray.spoolman_overlay && tray.remain_g >= 0) {
+            fila_remain_map[{ams_id, slot_id}] = tray.remain_g;
+            return;
+        }
+        if (!official_accurate)
+            return;
+        if (auto weight = tray.get_filament_remain_weight())
+            fila_remain_map[{ams_id, slot_id}] = weight.value();
+    };
     {
         for (auto ams_item : obj_->GetFilaSystem()->GetAmsList()) {
             std::string ams_id = ams_item.first;
             if (ams_item.second) {
                 for (auto tray_item : ams_item.second->GetTrays()) {
-                    std::string slot_id = tray_item.first;
-                    if (tray_item.second) {
-                        std::pair<std::string, std::string> key{ams_id, slot_id};
-                        if (auto weight = tray_item.second->get_filament_remain_weight()) {
-                            fila_remain_map[key] = weight.value();
-                        }
-                    }
+                    if (tray_item.second)
+                        add_remain(ams_id, tray_item.first, *tray_item.second);
                 }
             }
+        }
+        for (const auto& vt : obj_->vt_slot) {
+            if (vt.spoolman_overlay && vt.remain_g >= 0)
+                fila_remain_map[{vt.id, vt.id}] = vt.remain_g;
         }
     }
 
