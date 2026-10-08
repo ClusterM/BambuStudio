@@ -4045,6 +4045,9 @@ int MachineObject::parse_json(std::string tunnel, std::string payload, bool key_
         BOOST_LOG_TRIVIAL(trace) << "timeout = " << diff.count();
     }
 
+    if (m_calib)
+        m_calib->SchedulePAHistoryFetch();
+
     return 0;
 }
 
@@ -4090,6 +4093,8 @@ int MachineObject::publish_gcode(std::string gcode_str)
 void MachineObject::update_device_cert_state(bool ready)
 {
     device_cert_installed = ready;
+    if (ready && m_calib)
+        m_calib->SchedulePAHistoryFetch();
 }
 
 BBLSubTask* MachineObject::get_subtask()
