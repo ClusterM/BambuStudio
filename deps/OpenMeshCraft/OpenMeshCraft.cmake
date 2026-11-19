@@ -17,8 +17,10 @@
 # (eigen / parallel-hashmap / oneTBB) and vendors {fmt} for GCC9 / old Apple libc++.
 # Format compatibility lives in the fetched OpenMeshCraft zip
 # (bambulab/OpenMeshCraft @0e8d12c3, merged PR #2 OMC::format).
-# x86 SIMD is disabled via CMake args on Apple and aarch64; do not
-# mutate unzipped .h/.cpp here.
+# x86 SIMD is disabled via CMake args on Apple and aarch64.
+# Windows ARM64 still needs two source overlays (msvc/): Label.h uses the
+# x86 __lzcnt intrinsic, and Logger.cpp included windows.h inside namespace
+# OMC, which breaks the ARM64 SDK's _Interlocked* declarations.
 
 set(_OMC_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(_OMC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/omc_gen")
@@ -282,6 +284,12 @@ bambustudio_add_cmake_project(OpenMeshCraft
   COMMAND ${CMAKE_COMMAND} -E copy
     ${_OMC_DIR}/OpenMeshCraftConfig.cmake.in
     <SOURCE_DIR>/OpenMeshCraftConfig.cmake.in
+  COMMAND ${CMAKE_COMMAND} -E copy
+    ${_OMC_DIR}/msvc/Label.h
+    <SOURCE_DIR>/src/OpenMeshCraft/Utils/Label.h
+  COMMAND ${CMAKE_COMMAND} -E copy
+    ${_OMC_DIR}/msvc/Logger.cpp
+    <SOURCE_DIR>/src/OpenMeshCraft/Utils/Logger.cpp
   CMAKE_ARGS
     -DOMC_BUILD_TEST=OFF
     -DOMC_MASTER_PROJECT=OFF

@@ -3,9 +3,11 @@ set(_conf_cmd ./configure)
 if (MSVC)
     # bambulab's ffmpeg_prebuilts are x64-only; linking them on ARM64 leaves
     # every av*/sws* symbol unresolved. For Windows ARM64 use BtbN's winarm64
-    # shared build (pinned autobuild tag). FFmpeg 7.0/7.1 share the same
-    # library majors (avcodec-61, avutil-59, swscale-8), so the layout and DLL
-    # names match what the x64 package ships and what the code links against.
+    # shared 7.1 build. FFmpeg 7.0/7.1 share the same library majors
+    # (avcodec-61, avutil-59, swscale-8, swresample-5). Newer BtbN autobuilds
+    # dropped the 7.1 assets; autobuild-2026-07-17-13-22 404s, and the 7.1
+    # zip that is still published lives under autobuild-2026-07-31-14-10.
+    # ARM64EC keeps the x64 package: it links x64 object code.
     set(_ffmpeg_msvc_url "https://github.com/bambulab/ffmpeg_prebuilts/releases/download/7.0.2/7.0.2_msvc.zip")
     set(_ffmpeg_msvc_hash "SHA256=DF44AE6B97CE84C720695AE7F151B4A9654915D1841C68F10D62A1189E0E7181")
     # Generator platform takes precedence over the host processor so an ARM64
@@ -16,8 +18,8 @@ if (MSVC)
     endif ()
     string(TOUPPER "${_ffmpeg_gen_platform}" _ffmpeg_gen_platform)
     if (_ffmpeg_gen_platform MATCHES "^(ARM64|AARCH64)$")
-        set(_ffmpeg_msvc_url "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-17-13-22/ffmpeg-n7.1.5-2-g998de74adf-winarm64-gpl-shared-7.1.zip")
-        set(_ffmpeg_msvc_hash "SHA256=37e39b6f9115ec01a0ac6d7728e629e6be988d42495c850da4514930ad857f97")
+        set(_ffmpeg_msvc_url "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n7.1.5-12-g1fdbca85aa-winarm64-gpl-shared-7.1.zip")
+        set(_ffmpeg_msvc_hash "SHA256=717ed0a06dcdf1b4aee835615d8dcd968b268f89035bf1aba75d055661d29b9f")
     endif ()
     set(_dstdir ${DESTDIR}/usr/local)
     set(_source_dir "${CMAKE_BINARY_DIR}/dep_FFMPEG-prefix/src/dep_FFMPEG")
@@ -27,13 +29,10 @@ if (MSVC)
         DOWNLOAD_DIR ${DEP_DOWNLOAD_DIR}/FFMPEG
         CONFIGURE_COMMAND ""
         BUILD_COMMAND ""
-        INSTALL_COMMAND
-            # COMMAND ${CMAKE_COMMAND} -E make_directory "${_dstdir}/bin"
-            # COMMAND ${CMAKE_COMMAND} -E make_directory "${_dstdir}/lib"
-            # COMMAND ${CMAKE_COMMAND} -E make_directory "${_dstdir}/include"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory  "${_source_dir}/bin" "${_dstdir}/bin"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory  "${_source_dir}/lib" "${_dstdir}/lib"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory  "${_source_dir}/include" "${_dstdir}/include"
+        INSTALL_COMMAND ${CMAKE_COMMAND}
+            -DSRC=${_source_dir}
+            -DDST=${_dstdir}
+            -P ${CMAKE_CURRENT_LIST_DIR}/install_ffmpeg.cmake
     )
 
 else ()

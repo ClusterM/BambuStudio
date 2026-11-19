@@ -133,11 +133,12 @@ jobs:
           cmake .. -G "Visual Studio 18 2026" -A X64 -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0"
           cmake --build . --target install --config Release -- -m
 
-      # Windows on ARM64/ARM64EC: VS 2022 generator (the arm runner has no VS
-      # 2026), and the newest installed 10.* SDK is resolved at runtime rather
-      # than pinned, since the arm image may not ship the exact SDK the x64 job
-      # hard-codes. arm64ec produces the variant that can load the x64-only
-      # Bambu network plugin in-process at native speed.
+      # Windows on ARM64/ARM64EC. windows-11-arm is now the VS 2026 image
+      # (windows-11-vs2026-arm64); "Visual Studio 17 2022" finds no instance.
+      # The newest installed 10.* SDK is resolved at runtime rather than pinned,
+      # since the arm image may not ship the exact SDK the x64 job hard-codes.
+      # arm64ec produces the variant that can load the x64-only Bambu network
+      # plugin in-process at native speed.
       - name: Build slicer Win ARM64/ARM64EC
         if: inputs.os == 'windows-11-arm'
         working-directory: ${{ github.workspace }}
@@ -149,7 +150,7 @@ jobs:
           $platform = "${{ inputs.arch }}" -eq "arm64ec" ? "ARM64EC" : "ARM64"
           mkdir build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A $platform -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="$sdk"
+          cmake .. -G "Visual Studio 18 2026" -A $platform -DBBL_RELEASE_TO_PUBLIC=1 -DBBL_INTERNAL_TESTING=0 -DCMAKE_PREFIX_PATH="${{ github.workspace }}\deps\build\BambuStudio_dep\usr\local" -DCMAKE_INSTALL_PREFIX="../install-dir" -DCMAKE_BUILD_TYPE=Release -DWIN10SDK_PATH="$sdk"
           cmake --build . --target install --config Release -- -m
 
       # - name: Create installer Win
