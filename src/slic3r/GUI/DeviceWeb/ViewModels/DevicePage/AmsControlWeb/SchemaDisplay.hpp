@@ -54,6 +54,8 @@ namespace slot_view {
     inline constexpr const char* show_remain  = "show_remain";
     inline constexpr const char* show_remain_height = "show_remain_height";
     inline constexpr const char* fila_type    = "fila_type";
+    // Manufacturer, series words, remaining grams. K is appended by the card.
+    inline constexpr const char* info_lines   = "info_lines";
     inline constexpr const char* selected     = "selected";
     inline constexpr const char* loaded       = "loaded";
     inline constexpr const char* reading      = "reading";
@@ -306,6 +308,7 @@ struct SlotView
     bool                     show_remain = false;
     bool                     show_remain_height = false;
     std::string              fila_type;
+    std::vector<std::string> info_lines;
     bool                     selected    = false;
     bool                     loaded      = false;
     bool                     reading      = false;
@@ -486,6 +489,7 @@ inline void to_json(nlohmann::json& j, const SlotView& v)
         {slot_view::show_remain,  v.show_remain},
         {slot_view::show_remain_height, v.show_remain_height},
         {slot_view::fila_type,    v.fila_type},
+        {slot_view::info_lines,   v.info_lines},
         {slot_view::selected,     v.selected},
         {slot_view::loaded,       v.loaded},
         {slot_view::reading,      v.reading},
