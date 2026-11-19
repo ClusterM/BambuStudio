@@ -122,7 +122,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
-            brew uninstall --ignore-dependencies zstd
+            # Keep Homebrew zstd: curl on macos-26 is linked to libzstd and
+            # cannot download cmake@3.31.0 after this package is removed.
+            # brew uninstall --ignore-dependencies zstd
             brew unlink cmake || true
             brew tap-new $USER/old-cmake
             brew extract --version=3.31.0 cmake $USER/old-cmake
@@ -141,7 +143,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
-            brew uninstall --ignore-dependencies zstd
+            # Keep Homebrew zstd: curl on macos-26 is linked to libzstd and
+            # cannot download cmake@3.31.0 after this package is removed.
+            # brew uninstall --ignore-dependencies zstd
             brew unlink cmake || true
             brew tap-new $USER/old-cmake
             brew extract --version=3.31.0 cmake $USER/old-cmake
