@@ -2,7 +2,9 @@
 #include "wgtFilaManagerCloudClient.h"
 #include "wgtFilaManagerCloudDispatcher.h"
 #include "wgtFilaManagerColorType.h"
+#include "wgtFilaManagerFeature.h"
 #include "wgtFilaManagerStore.h"
+#include "SpoolmanClient.h"
 
 #include "slic3r/Utils/NetworkAgent.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
@@ -12,7 +14,9 @@
 #include <wx/app.h>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <set>
+#include <vector>
 #include "libslic3r/Log.hpp"
 
 namespace Slic3r { namespace GUI {
@@ -350,9 +354,123 @@ nlohmann::json wgtFilaManagerCloudSync::spool_to_cloud_json(const FilamentSpool&
 // Pull: cloud → local
 // ---------------------------------------------------------------------------
 
+void wgtFilaManagerCloudSync::apply_pulled_spools(const std::vector<FilamentSpool>& list)
+{
+    std::set<std::string> cloud_ids;
+    int dropped_local_only = 0;
+
+    auto machine_is_online = [](const std::string& dev_id) -> bool {
+        if (dev_id.empty()) return false;
+        auto* mgr = wxGetApp().getDeviceManager();
+        if (!mgr) return false;
+        MachineObject* obj = mgr->get_my_machine(dev_id);
+        return obj && obj->is_online();
+    };
+
+    auto slot_key = [](const FilamentSpool& s) {
+        return s.dev_id + ":" + std::to_string(s.ams_id) + ":" + s.slot_id;
+    };
+    std::map<std::string, std::string> cloud_slot_owner;
+    for (const FilamentSpool& s : list) {
+        if (s.in_printer && !s.dev_id.empty() && s.ams_id >= 0 && !s.slot_id.empty())
+            cloud_slot_owner[slot_key(s)] = s.spool_id;
+    }
+
+    for (FilamentSpool cloud_spool : list) {
+        if (cloud_spool.spool_id.empty()) continue;
+        if (is_spoolman_enabled())
+            apply_spoolman_preset_match(cloud_spool);
+        cloud_spool.cloud_synced = true;
+        cloud_ids.insert(cloud_spool.spool_id);
+
+        if (const FilamentSpool* existing = m_store->get_spool(cloud_spool.spool_id)) {
+            const bool local_is_live = machine_is_online(existing->dev_id);
+            bool slot_moved_to_other = false;
+            if (local_is_live && existing->in_printer && existing->mount_hold_count == 0) {
+                auto owner_it = cloud_slot_owner.find(slot_key(*existing));
+                slot_moved_to_other = owner_it != cloud_slot_owner.end() && owner_it->second != existing->spool_id;
+                if (slot_moved_to_other) {
+                    BOOST_LOG_TRIVIAL(info) << "[FilaCloudSync] pull: slot moved to spool_id=" << owner_it->second
+                                            << " in cloud, drop stale local mount spool_id=" << existing->spool_id << " "
+                                            << KV(log_key::dev_id, existing->dev_id) << KV(log_key::ams_id, existing->ams_id)
+                                            << KV(log_key::slot_id, existing->slot_id);
+                }
+            }
+            if (local_is_live && !slot_moved_to_other) {
+                cloud_spool.in_printer  = existing->in_printer;
+                cloud_spool.dev_id      = existing->dev_id;
+                cloud_spool.ams_sn      = existing->ams_sn;
+                cloud_spool.ams_id      = existing->ams_id;
+                cloud_spool.ams_type    = existing->ams_type;
+                cloud_spool.slot_id     = existing->slot_id;
+                cloud_spool.device_name = existing->device_name;
+            }
+            m_store->update_spool(cloud_spool);
+        } else {
+            m_store->add_spool(cloud_spool);
+        }
+    }
+
+    for (const auto& existing : m_store->spools_to_json()) {
+        const std::string existing_id = existing.value("spool_id", "");
+        if (existing_id.empty()) continue;
+        if (cloud_ids.count(existing_id) == 0) {
+            m_store->remove_spool(existing_id);
+            ++dropped_local_only;
+        }
+    }
+
+    BOOST_LOG_TRIVIAL(info) << "[FilaCloudSync] pull merged, "
+                            << list.size() << " items kept, "
+                            << dropped_local_only << " local-only entries dropped";
+    wxGetApp().emit_fila_debug_log("data", "info", "Cloud pull merged",
+                                   "Pull overwrote local store",
+                                   {{"count", static_cast<int>(list.size())},
+                                    {"dropped_local_only", dropped_local_only}});
+}
+
+void wgtFilaManagerCloudSync::pull_from_spoolman()
+{
+    m_syncing = true;
+    m_last_pull_succeeded = false;
+    m_last_pull_error_code = 0;
+    m_last_pull_error_message.clear();
+    BOOST_LOG_TRIVIAL(info) << "[FilaCloudSync] pull_from_spoolman started";
+
+    SpoolmanClient::from_app_config().list_spools(
+        [this](std::vector<FilamentSpool> list) {
+            wxTheApp->CallAfter([this, list = std::move(list)]() {
+                try {
+                    apply_pulled_spools(list);
+                    m_last_pull_succeeded = true;
+                } catch (const std::exception& e) {
+                    m_last_pull_succeeded = false;
+                    m_last_pull_error_code = -1;
+                    m_last_pull_error_message = e.what();
+                    BOOST_LOG_TRIVIAL(error) << "[FilaCloudSync] pull_from_spoolman merge error: " << e.what();
+                }
+                m_syncing = false;
+            });
+        },
+        [this](int code, const std::string& err) {
+            wxTheApp->CallAfter([this, code, err]() {
+                m_last_pull_succeeded = false;
+                m_last_pull_error_code = code;
+                m_last_pull_error_message = err;
+                BOOST_LOG_TRIVIAL(error) << "[FilaCloudSync] pull_from_spoolman failed: " << code << " " << err;
+                m_syncing = false;
+            });
+        });
+}
+
 void wgtFilaManagerCloudSync::pull_from_cloud()
 {
     if (m_syncing) return;
+
+    if (is_spoolman_enabled()) {
+        pull_from_spoolman();
+        return;
+    }
 
     NetworkAgent* agent = wxGetApp().getAgent();
     if (!agent || !agent->is_user_login()) return;
@@ -370,89 +488,16 @@ void wgtFilaManagerCloudSync::pull_from_cloud()
         [this](const nlohmann::json& data) {
             wxTheApp->CallAfter([this, data]() {
                 try {
-                    // Cloud ListFilamentV2Resp returns { total, hits: [...] }
-                    // at the root; tolerate a few alternative shapes for
-                    // forward/backward compatibility.
                     nlohmann::json list = extract_cloud_list(data);
-
-                    // Cloud is the source of truth: collect every cloud id we
-                    // are about to keep, then rewrite the local store to match
-                    // exactly that set. Local-only entries (e.g. pushes that
-                    // never succeeded) are dropped on purpose so a pull always
-                    // leaves the local list in sync with the latest cloud
-                    // snapshot.
-                    std::set<std::string> cloud_ids;
-                    int dropped_local_only = 0;
-
-                    auto machine_is_online = [](const std::string& dev_id) -> bool {
-                        if (dev_id.empty()) return false;
-                        auto* mgr = wxGetApp().getDeviceManager();
-                        if (!mgr) return false;
-                        MachineObject* obj = mgr->get_my_machine(dev_id);
-                        return obj && obj->is_online();
-                    };
-
-                    auto slot_key = [](const FilamentSpool& s) {
-                        return s.dev_id + ":" + std::to_string(s.ams_id) + ":" + s.slot_id;
-                    };
-                    std::map<std::string, std::string> cloud_slot_owner;
-                    for (const auto& item : list) {
-                        const FilamentSpool s = cloud_json_to_spool(item);
-                        if (s.in_printer && !s.dev_id.empty() && s.ams_id >= 0 && !s.slot_id.empty())
-                            cloud_slot_owner[slot_key(s)] = s.spool_id;
-                    }
-
+                    std::vector<FilamentSpool> pulled;
+                    pulled.reserve(list.size());
                     for (const auto& item : list) {
                         FilamentSpool cloud_spool = cloud_json_to_spool(item);
                         if (cloud_spool.spool_id.empty()) continue;
-                        cloud_spool.cloud_synced = true;
-                        cloud_ids.insert(cloud_spool.spool_id);
-
-                        if (const FilamentSpool* existing = m_store->get_spool(cloud_spool.spool_id)) {
-                            const bool local_is_live = machine_is_online(existing->dev_id);
-                            bool slot_moved_to_other = false;
-                            if (local_is_live && existing->in_printer && existing->mount_hold_count == 0) {
-                                auto owner_it = cloud_slot_owner.find(slot_key(*existing));
-                                slot_moved_to_other = owner_it != cloud_slot_owner.end() && owner_it->second != existing->spool_id;
-                                if (slot_moved_to_other) {
-                                    BOOST_LOG_TRIVIAL(info) << "[FilaCloudSync] pull: slot moved to spool_id=" << owner_it->second
-                                                            << " in cloud, drop stale local mount spool_id=" << existing->spool_id << " "
-                                                            << KV(log_key::dev_id, existing->dev_id) << KV(log_key::ams_id, existing->ams_id)
-                                                            << KV(log_key::slot_id, existing->slot_id);
-                                }
-                            }
-                            if (local_is_live && !slot_moved_to_other) {
-                                cloud_spool.in_printer  = existing->in_printer;
-                                cloud_spool.dev_id      = existing->dev_id;
-                                cloud_spool.ams_sn      = existing->ams_sn;
-                                cloud_spool.ams_id      = existing->ams_id;
-                                cloud_spool.ams_type    = existing->ams_type;
-                                cloud_spool.slot_id     = existing->slot_id;
-                                cloud_spool.device_name = existing->device_name;
-                            }
-                            m_store->update_spool(cloud_spool);
-                        } else {
-                            m_store->add_spool(cloud_spool);
-                        }
+                        pulled.push_back(std::move(cloud_spool));
                     }
-
-                    for (const auto& existing : m_store->spools_to_json()) {
-                        const std::string existing_id = existing.value("spool_id", "");
-                        if (existing_id.empty()) continue;
-                        if (cloud_ids.count(existing_id) == 0) {
-                            m_store->remove_spool(existing_id);
-                            ++dropped_local_only;
-                        }
-                    }
-
+                    apply_pulled_spools(pulled);
                     m_last_pull_succeeded = true;
-                    BOOST_LOG_TRIVIAL(info) << "[FilaCloudSync] pull_from_cloud completed, "
-                                            << list.size() << " items kept, "
-                                            << dropped_local_only << " local-only entries dropped";
-                    wxGetApp().emit_fila_debug_log("data", "info", "Cloud pull merged",
-                                                   "Cloud pull overwrote local store",
-                                                   {{"count", static_cast<int>(list.size())},
-                                                    {"dropped_local_only", dropped_local_only}});
                 } catch (const std::exception& e) {
                     m_last_pull_succeeded = false;
                     m_last_pull_error_code = -1;
@@ -819,6 +864,7 @@ void wgtFilaManagerCloudSync::notify_ams_synced(
     AmsAutoPushThrottle::DeviceState        device_state)
 {
     if (changed.empty()) return;
+    if (is_spoolman_enabled()) return;
 
     // STUDIO-18155 follow-up：未登录 / LAN-only 模式下不能进 throttle.record_success，
     // 否则 cooldown 表会被锁死，等用户后续登录第一波同步会全部 SkipNoDiff，必须等
@@ -1015,6 +1061,8 @@ void wgtFilaManagerCloudSync::fetch_filament_config(
 void wgtFilaManagerCloudSync::sync_ams_to_cloud(
     const std::string& dev_id, const std::vector<std::string>& spool_ids)
 {
+    if (is_spoolman_enabled())
+        return;
     if (spool_ids.empty() || !m_client) {
         BOOST_LOG_TRIVIAL(info)
             << "[FilaCloudSync] sync_ams_to_cloud early-return: dev=" << dev_id
@@ -1089,6 +1137,8 @@ void wgtFilaManagerCloudSync::sync_slot_mappings_to_cloud(
     const std::string& dev_id,
     const std::vector<EjectedSlotSnapshot>& ejected)
 {
+    if (is_spoolman_enabled())
+        return;
     if (ejected.empty() || !m_client) {
         BOOST_LOG_TRIVIAL(info)
             << "[FilaCloudSync] sync_slot_mappings_to_cloud early-return: dev=" << dev_id
@@ -1151,7 +1201,7 @@ void wgtFilaManagerCloudSync::sync_slot_bindings_to_cloud(
         if (on_done) wxGetApp().CallAfter(on_done);
     };
 
-    if (spool_ids.empty() || !m_client) {
+    if (is_spoolman_enabled() || spool_ids.empty() || !m_client) {
         finish();
         return;
     }

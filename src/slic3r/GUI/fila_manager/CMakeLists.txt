@@ -18,5 +18,11 @@ list(APPEND SLIC3R_GUI_SOURCES
     GUI/fila_manager/wgtFilaManagerCloudDispatcher.cpp
     GUI/fila_manager/AmsAutoPushThrottle.h
     GUI/fila_manager/AmsAutoPushThrottle.cpp
+    GUI/fila_manager/SpoolmanClient.h
+    GUI/fila_manager/SpoolmanClient.cpp
+    GUI/fila_manager/HomeAssistantClient.h
+    GUI/fila_manager/HomeAssistantClient.cpp
+    GUI/fila_manager/AmsSpoolOverlay.h
+    GUI/fila_manager/AmsSpoolOverlay.cpp
 )
 set(SLIC3R_GUI_SOURCES ${SLIC3R_GUI_SOURCES} PARENT_SCOPE)
