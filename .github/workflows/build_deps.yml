@@ -122,15 +122,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
-            # Keep Homebrew zstd: curl on macos-26 is linked to libzstd and
-            # cannot download cmake@3.31.0 after this package is removed.
+            # Keep Homebrew zstd: curl on macos-26 is linked against libzstd.
             # brew uninstall --ignore-dependencies zstd
-            brew unlink cmake || true
-            brew tap-new $USER/old-cmake
-            brew extract --version=3.31.0 cmake $USER/old-cmake
-            brew install $USER/old-cmake/cmake@3.31.0
-            brew link --overwrite cmake@3.31.0
-            brew pin cmake@3.31.0
+            cmake_bin="$(bash scripts/install-cmake-3.31-macos.sh)"
+            export PATH="${cmake_bin}:${PATH}"
+            cmake --version
             ./BuildMac.sh -d -x -a x86_64 -t 10.15 -1
             for arch in x86_64; do
                 (cd "${{ github.workspace }}/deps/build/${arch}" && \
@@ -143,15 +139,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
             brew install automake texinfo nasm yasm x264
-            # Keep Homebrew zstd: curl on macos-26 is linked to libzstd and
-            # cannot download cmake@3.31.0 after this package is removed.
+            # Keep Homebrew zstd: curl on macos-26 is linked against libzstd.
             # brew uninstall --ignore-dependencies zstd
-            brew unlink cmake || true
-            brew tap-new $USER/old-cmake
-            brew extract --version=3.31.0 cmake $USER/old-cmake
-            brew install $USER/old-cmake/cmake@3.31.0
-            brew link --overwrite cmake@3.31.0
-            brew pin cmake@3.31.0
+            cmake_bin="$(bash scripts/install-cmake-3.31-macos.sh)"
+            export PATH="${cmake_bin}:${PATH}"
+            cmake --version
             ./BuildMac.sh -d -x -a universal -t 10.15 -1
             for arch in arm64 x86_64; do
                 (cd "${{ github.workspace }}/deps/build/${arch}" && \

@@ -22,6 +22,8 @@ build-linux/*
 deps/build-linux/*
 **/.DS_Store
 install_*
+# The MSVC FFmpeg install script matches install_* and must stay tracked.
+!deps/FFMPEG/install_ffmpeg.cmake
 build_*/
 SVG
 doc/
