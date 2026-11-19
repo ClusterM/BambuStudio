@@ -962,6 +962,9 @@ public:
     // only check sync status and printer model id
     bool get_machine_sync_status();
     void update_machine_sync_status();
+    // Turn off arc fitting when the connected printer does the curve planning itself.
+    // Returns true when the option has just been switched off.
+    bool apply_printer_arc_fitting_capability(bool allow_jump_to_option);
     void update_filament_volume_map(int extruder_id, int volume_type);
 
     void show_wrapping_detect_dialog_if_necessary();
