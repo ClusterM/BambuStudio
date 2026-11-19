@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include "slic3r/Utils/json_diff.hpp"
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -103,6 +104,10 @@ public:
     bool IsFetchIdle() const { return m_pa_table_status == CalibStatus::IDLE || m_pa_table_status == CalibStatus::FINISHED; }
     bool PrepareFetchQueue();
     void SendNextFetch();
+    /* Start or continue the PA table fetch. Safe to call on every status tick. */
+    void TickPAHistoryFetch();
+    /* Post TickPAHistoryFetch to the UI thread when a fetch is still pending. */
+    void SchedulePAHistoryFetch();
 
     void RequestFlowRateResult();
     CalibStatus GetFlowRateResultStatus() const {return m_flow_results_status;}
@@ -160,6 +165,7 @@ private:
     CalibStatus m_pa_results_status{CalibStatus::IDLE};
     CalibStatus m_pa_table_status{CalibStatus::IDLE};
     CalibStatus m_flow_results_status{CalibStatus::IDLE};
+    std::atomic<bool> m_pa_fetch_scheduled{false};
 
     FlowRatioCalibrationType   m_flow_ratio_calibration_type{FlowRatioCalibrationType::COMPLETE_CALIBRATION};
     ManualPaCaliMethod         m_manual_pa_cali_method{ManualPaCaliMethod::PA_LINE};
