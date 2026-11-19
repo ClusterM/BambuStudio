@@ -73,4 +73,10 @@ void wgtAmsControlWebPanel::UpdateByMachine(Slic3r::MachineObject* /*obj*/)
     }
 }
 
+void wgtAmsControlWebPanel::SetPanelWidth(int width_dip)
+{
+    if (m_device_web)
+        m_device_web->SetAmsControlWebWidthDip(width_dip);
+}
+
 } // namespace Slic3r::GUI
