@@ -20,6 +20,10 @@
 # (bambulab/OpenMeshCraft @0e8d12c3, merged PR #2 OMC::format). Source fixes are
 # applied as the numbered patches in this directory; do not edit the unzipped
 # .h/.cpp any other way. x86 SIMD is disabled via CMake args on Apple and aarch64.
+# Windows ARM64 also copies msvc/Logger.cpp over the fetched source: upstream
+# includes windows.h inside namespace OMC, which breaks the ARM64 SDK's
+# _Interlocked* declarations. Label.h is left to patch 0002, which replaces
+# the x86 __lzcnt intrinsic.
 
 set(_OMC_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
@@ -292,9 +296,14 @@ bambustudio_add_cmake_project(OpenMeshCraft
     <SOURCE_DIR>/OpenMeshCraftConfig.cmake.in
   # 0001: coplanar input crashes/hangs; 0002: coincident face winding, no input
   # limit, labeled arrangement export (used by wrapper/OpenMeshCraftBoolean.cpp).
+  # 0002 also replaces Label.h, so the ARM64 __lzcnt overlay must not be copied
+  # on top of it. Logger.cpp is not touched by those patches.
   COMMAND git apply ${OMC_DIRECTORY_FLAG} --verbose --ignore-space-change --whitespace=fix
     ${_OMC_DIR}/0001-OpenMeshCraft-coplanar-crash-fix.patch
     ${_OMC_DIR}/0002-OpenMeshCraft-coincident-winding-labels-export.patch
+  COMMAND ${CMAKE_COMMAND} -E copy
+    ${_OMC_DIR}/msvc/Logger.cpp
+    <SOURCE_DIR>/src/OpenMeshCraft/Utils/Logger.cpp
   CMAKE_ARGS
     -DOMC_BUILD_TEST=OFF
     -DOMC_MASTER_PROJECT=OFF
