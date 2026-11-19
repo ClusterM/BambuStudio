@@ -78,6 +78,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/Widgets/AMSControl.hpp
     GUI/Widgets/AMSItem.cpp
     GUI/Widgets/AMSItem.hpp
+    GUI/Widgets/DotMatrixDisplay.cpp
+    GUI/Widgets/DotMatrixDisplay.hpp
     GUI/Widgets/FilamentView.cpp
     GUI/Widgets/FilamentView.hpp
     GUI/Widgets/AmsSlotPopup.cpp
