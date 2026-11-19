@@ -19,7 +19,7 @@
 # Linux/mac/AVX compatibility lives in the fetched OpenMeshCraft zip
 # (bambulab/OpenMeshCraft @0e8d12c3, merged PR #2 OMC::format). Source fixes are
 # applied as the numbered patches in this directory; do not edit the unzipped
-# .h/.cpp any other way.
+# .h/.cpp any other way. x86 SIMD is disabled via CMake args on Apple and aarch64.
 
 set(_OMC_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
@@ -249,12 +249,14 @@ if(MPFR_PKG)
   list(APPEND _OMC_DEPENDS ${MPFR_PKG})
 endif()
 
+# AVX/AVX2/FMA stay off everywhere: MSVC emits BMI2/FMA under AVX2 and crashes
+# on older x86 CPUs. SSE2 is x86-only, so Apple Silicon and aarch64 turn it off too.
 set(_OMC_SIMD_ARGS
   -DOMC_CMAKE_ENABLE_AVX=OFF
   -DOMC_CMAKE_ENABLE_AVX2=OFF
   -DOMC_CMAKE_ENABLE_FMA=OFF
 )
-if(APPLE)
+if(APPLE OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|aarch64|arm64)$" OR CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
   list(APPEND _OMC_SIMD_ARGS -DOMC_CMAKE_ENABLE_SSE2=OFF)
 endif()
 
