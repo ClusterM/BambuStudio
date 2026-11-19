@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useDeviceWebTheme } from '../../../hooks/useDeviceWebTheme';
-import { useFitHostWidth } from '../../../hooks/useFitHostWidth';
 import { useSendToCpp } from '../../../hooks/Bridge';
 import { useAmsControlWebBridge } from './useAmsControlWebBridge';
 import './ams-control-web.css';
@@ -66,7 +65,9 @@ function carryingLink(links: SlotLink[]): SlotLink | undefined {
 
 export function AmsControlWebPage() {
   useDeviceWebTheme();
-  useFitHostWidth(HOST_WIDTH_DIP);
+  // Do not use useFitHostWidth here. That hook only shrinks, and when the
+  // Control column is wider than 586 DIP it clears document zoom. The host
+  // scales this page up to fill the column.
   const {
     state,
     selectSlot,
