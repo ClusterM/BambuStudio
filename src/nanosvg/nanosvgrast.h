@@ -33,6 +33,11 @@
 
 #include "nanosvg.h"
 
+#define nsvgCreateRasterizer bambu_nsvgCreateRasterizer
+#define nsvgDeleteRasterizer bambu_nsvgDeleteRasterizer
+#define nsvgRasterize bambu_nsvgRasterize
+#define nsvgRasterizeXY bambu_nsvgRasterizeXY
+
 #ifndef NANOSVGRAST_CPLUSPLUS
 #ifdef __cplusplus
 extern "C" {

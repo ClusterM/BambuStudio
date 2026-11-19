@@ -29,6 +29,15 @@
 #ifndef NANOSVG_H
 #define NANOSVG_H
 
+/* wxWidgets static core compiles its own nanosvg (bmpsvg.cpp). These names
+   stay private to BambuStudio so the two copies can be linked together. */
+#define nsvgParseFromFile bambu_nsvgParseFromFile
+#define nsvgParse bambu_nsvgParse
+#define nsvgDuplicatePath bambu_nsvgDuplicatePath
+#define nsvgDelete bambu_nsvgDelete
+#define nsvg__parseXML bambu_nsvg__parseXML
+#define nsvg__colors bambu_nsvg__colors
+
 #ifndef NANOSVG_CPLUSPLUS
 #ifdef __cplusplus
 extern "C" {

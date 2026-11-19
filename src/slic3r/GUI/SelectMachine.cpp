@@ -935,7 +935,50 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_button_ensure->SetMinSize(SELECT_MACHINE_DIALOG_BUTTON_SIZE2);
     m_button_ensure->SetMinSize(SELECT_MACHINE_DIALOG_BUTTON_SIZE2);
     m_button_ensure->SetCornerRadius(FromDIP(4));
-    m_button_ensure->Bind(wxEVT_BUTTON, &SelectMachineDialog::on_ok_btn, this);
+    m_button_ensure->Bind(wxEVT_BUTTON, &SelectMachineDialog::on_ensure_btn, this);
+
+    m_check_schedule = new CheckBox(m_panel_prepare);
+    m_check_schedule->SetValue(false);
+    m_check_schedule->SetBackgroundColour(m_panel_prepare->GetBackgroundColour());
+    // CheckBox updates its bitmap in its own toggle handler. Skipping is required
+    // or the value changes and the drawn mark stays on the previous image.
+    m_check_schedule->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) {
+        e.Skip();
+        sync_schedule_controls();
+        if (m_check_schedule)
+            m_check_schedule->CallAfter([cb = m_check_schedule] { cb->Refresh(); });
+    });
+
+    m_label_schedule = new Label(m_panel_prepare, _L("Schedule"));
+    m_label_schedule->SetFont(Label::Body_14);
+    m_label_schedule->SetBackgroundColour(m_panel_prepare->GetBackgroundColour());
+    m_label_schedule->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent&) {
+        if (!m_check_schedule || m_schedule_armed || !m_check_schedule->IsEnabled())
+            return;
+        m_check_schedule->SetValue(!m_check_schedule->GetValue());
+        m_check_schedule->Refresh();
+        sync_schedule_controls();
+    });
+
+    m_schedule_time = new wxTextCtrl(m_panel_prepare, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                     wxSize(FromDIP(64), FromDIP(24)), wxTE_CENTRE | wxTE_PROCESS_ENTER);
+    m_schedule_time->SetFont(Label::Body_14);
+    m_schedule_time->SetMaxLength(5);
+    m_schedule_time->SetMinSize(wxSize(FromDIP(64), FromDIP(24)));
+    m_schedule_time->SetMaxSize(wxSize(FromDIP(72), FromDIP(28)));
+    m_schedule_time->Disable();
+    m_schedule_time->Bind(wxEVT_TEXT, [this](wxCommandEvent&) {
+        if (!m_schedule_armed)
+            sync_schedule_controls();
+    });
+
+    m_schedule_countdown = new Label(m_panel_prepare, wxString("00:00:00"));
+    m_schedule_countdown->SetFont(wxFont(wxFontInfo(FromDIP(14)).Family(wxFONTFAMILY_TELETYPE)));
+    m_schedule_countdown->SetForegroundColour(wxColour(0, 174, 66));
+    m_schedule_countdown->SetBackgroundColour(m_panel_prepare->GetBackgroundColour());
+    m_schedule_countdown->SetMinSize(wxSize(FromDIP(88), FromDIP(24)));
+    m_schedule_countdown->Hide();
+    set_default_schedule_time();
 
     auto* action_sizer = new wxBoxSizer(wxHORIZONTAL);
 #if STUDIO_ENABLE_PRINT_QUENE
@@ -945,15 +988,23 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_button_add_to_queue->SetCornerRadius(FromDIP(4));
     m_button_add_to_queue->EnableTooltipEvenDisabled();
     m_button_add_to_queue->Bind(wxEVT_BUTTON, &SelectMachineDialog::on_add_to_queue_btn, this);
-    action_sizer->Add(m_button_add_to_queue, 0, wxRIGHT, FromDIP(8));
+    action_sizer->Add(m_button_add_to_queue, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
 #endif
-    action_sizer->Add(m_button_ensure, 0);
+    action_sizer->Add(m_button_ensure, 0, wxALIGN_CENTER_VERTICAL);
 
     m_sizer_pcont->Add(0, 0, 1, wxEXPAND, 0);
-    m_sizer_pcont->Add(action_sizer, 0, wxALIGN_CENTER, 0);
 
-    m_sizer_prepare->Add(0, 0, 1, wxTOP, FromDIP(12));
-    m_sizer_prepare->Add(m_sizer_pcont, 0, wxALIGN_CENTER, 0);
+    // Schedule sits on the left of the bar, Send stays on the right.
+    auto* schedule_row = new wxBoxSizer(wxHORIZONTAL);
+    schedule_row->Add(m_check_schedule, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(4));
+    schedule_row->Add(m_label_schedule, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+    schedule_row->Add(m_schedule_time, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+    schedule_row->Add(m_schedule_countdown, 0, wxALIGN_CENTER_VERTICAL);
+    schedule_row->Add(0, 0, 1, wxEXPAND);
+    schedule_row->Add(action_sizer, 0, wxALIGN_CENTER_VERTICAL);
+    m_sizer_pcont->Add(schedule_row, 0, wxEXPAND);
+
+    m_sizer_prepare->Add(m_sizer_pcont, 1, wxEXPAND);
 
     m_panel_prepare->SetSizer(m_sizer_prepare);
     m_panel_prepare->Layout();
@@ -1312,7 +1363,10 @@ void SelectMachineDialog::prepare_mode(bool refresh_button)
         wxEndBusyCursor();
 
     if (refresh_button) {
-        EnableEditing(true);
+        // A running countdown has already locked the form. A status refresh must
+        // not open it again until the user cancels or the print actually starts.
+        if (!m_schedule_armed)
+            EnableEditing(true);
         Enable_Send_Button(true);
     }
 
@@ -2373,6 +2427,8 @@ void SelectMachineDialog::init_timer()
 
 void SelectMachineDialog::on_cancel(wxCloseEvent &event)
 {
+    reset_schedule_state();
+
     if (m_mapping_popup.IsShown())
         m_mapping_popup.Dismiss();
 
@@ -3222,11 +3278,20 @@ void SelectMachineDialog::start_timelapse_storage_check(MachineObject* obj)
         m_timelapse_check_timer = new wxTimer(this);
         Bind(wxEVT_TIMER, &SelectMachineDialog::on_timelapse_storage_check_timer, this, m_timelapse_check_timer->GetId());
     }
+    if (m_arm_when_preflight_reaches_send)
+        m_schedule_preflight_pending = true;
     m_timelapse_check_timer->Start(m_timelapse_check_interval_ms);
 }
 
 void SelectMachineDialog::on_timelapse_storage_check_timer(wxTimerEvent& /*event*/)
 {
+    // Close can stop the timer after this event was already queued.
+    if (!IsShown()) {
+        if (m_timelapse_check_timer)
+            m_timelapse_check_timer->Stop();
+        return;
+    }
+
     m_timelapse_check_elapsed_ms += m_timelapse_check_interval_ms;
 
     DeviceManager* dev = wxGetApp().getDeviceManager();
@@ -3344,18 +3409,28 @@ void SelectMachineDialog::show_timelapse_storage_dialog(MachineObject* obj)
     int result = dlg.ShowModal();
 
     if (result == wxID_OK) {
-        // Confirm & Print
-        obj->command_ipcam_delete_oldest_timelapse(m_timelapse_storage, m_timelapse_total_layer);
-        on_send_print();
+        // Confirm & Print. A scheduled job remembers the cleanup and sends it later.
+        if (m_arm_when_preflight_reaches_send) {
+            m_defer_timelapse_cleanup = true;
+            on_send_print();
+        } else {
+            obj->command_ipcam_delete_oldest_timelapse(m_timelapse_storage, m_timelapse_total_layer);
+            on_send_print();
+        }
     } else if (result == wxID_NO) {
         // Cancel Timelapse & Print
         m_checkbox_list["timelapse"]->setValue("off");
         on_send_print();
     } else if (result == ID_CLEANUP) {
         // Clean Up: close SelectMachineDialog and navigate
+        if (m_arm_when_preflight_reaches_send || m_schedule_preflight_pending)
+            clear_schedule_wait();
         navigate_to_timelapse_page();
+    } else if (m_arm_when_preflight_reaches_send || m_schedule_preflight_pending) {
+        // X button during Schedule: do not arm.
+        clear_schedule_wait();
     }
-    // wxID_CANCEL (X button): do nothing, user dismissed the dialog
+    // wxID_CANCEL (X button) on a normal send: do nothing, user dismissed the dialog
 }
 
 void SelectMachineDialog::navigate_to_timelapse_page()
@@ -3603,7 +3678,7 @@ void SelectMachineDialog::Enable_Auto_Refill(bool enable)
     m_ams_backup_tip->Refresh();
 }
 
-bool SelectMachineDialog::apply_saved_pa_profiles(MachineObject* obj)
+bool SelectMachineDialog::apply_saved_pa_profiles(MachineObject* obj, std::vector<PACalibIndexInfo>* deferred)
 {
     if (!obj || !obj->GetCalib() || !obj->GetExtderSystem() || !obj->GetFilaSystem())
         return true;
@@ -3870,7 +3945,11 @@ bool SelectMachineDialog::apply_saved_pa_profiles(MachineObject* obj)
         select_info.cali_idx        = slot.cali_idx;
         select_info.filament_id     = slot.filament_id;
         select_info.nozzle_diameter = slot.nozzle_diameter;
-        CalibUtils::select_PA_calib_result(select_info);
+        // Schedule keeps the choice and sends it only when the print actually starts.
+        if (deferred)
+            deferred->push_back(select_info);
+        else
+            CalibUtils::select_PA_calib_result(select_info);
         BOOST_LOG_TRIVIAL(info) << "apply_saved_pa_profiles: sel ams=" << slot.ams_id << " slot=" << slot.slot_id
                                 << " tray=" << slot.tray_id << " cali_idx=" << slot.cali_idx << " filament=" << slot.filament_id
                                 << " extruder=" << slot.extruder_id;
@@ -3882,28 +3961,51 @@ void SelectMachineDialog::on_send_print()
 {
     BOOST_LOG_TRIVIAL(info) << "print_job: on_ok to send";
 
+    // A Schedule click uses this function only as the end of the confirm chain.
+    // Any return before the print is armed drops the request. Deferred choices
+    // (timelapse cleanup, PA list) stay until arming succeeds or fails.
+    // Leave the preflight flags set until arming or failure. The PA dialog is
+    // modal and the status timer keeps running under it; clearing the flags
+    // here would unlock the form before the user has finished confirming.
+    const bool scheduling = m_arm_when_preflight_reaches_send;
+    auto fail_schedule = [&]() {
+        if (!scheduling)
+            return;
+        m_arm_when_preflight_reaches_send = false;
+        m_schedule_preflight_pending = false;
+        m_defer_timelapse_cleanup = false;
+        m_deferred_pa_selections.clear();
+        m_pa_preflight_done = false;
+        if (!m_is_in_sending_mode)
+            EnableEditing(true);
+        sync_schedule_controls();
+    };
+
     if (m_mapping_popup.IsShown())
         m_mapping_popup.Dismiss();
 
     if ((m_print_type == PrintFromType::FROM_NORMAL || m_print_type == PrintFromType::FROM_PRINT_QUEUE) && m_is_in_sending_mode){
+        fail_schedule();
         return;
     }
 
     int result = 0;
     if (m_printer_last_select.empty()) {
+        fail_schedule();
         return;
     }
 
     DeviceManager* dev = Slic3r::GUI::wxGetApp().getDeviceManager();
-    if (!dev) return;
+    if (!dev) { fail_schedule(); return; }
 
     MachineObject* obj_ = dev->get_selected_machine();
+    if (obj_ == nullptr) { fail_schedule(); return; }
     assert(obj_->get_dev_id() == m_printer_last_select);
-    if (obj_ == nullptr) { return; }
 
     if (!DevMappingUtil::is_valid_mapping_result(obj_, m_ams_mapping_result)) {
         BOOST_LOG_TRIVIAL(error) << "print_job: invalid mapping";
         Enable_Send_Button(true);
+        fail_schedule();
         return;
     }
 
@@ -3925,12 +4027,40 @@ void SelectMachineDialog::on_send_print()
                           _L("Warning"), wxOK | wxICON_WARNING);
         dlg.ShowModal();
         Enable_Send_Button(true);
+        fail_schedule();
+        return;
+    }
+
+    if (scheduling) {
+        m_deferred_pa_selections.clear();
+        if (!apply_saved_pa_profiles(obj_, &m_deferred_pa_selections)) {
+            fail_schedule();
+            return;
+        }
+        if (!arm_schedule()) {
+            fail_schedule();
+            return;
+        }
+        m_pa_preflight_done = true;
+        BOOST_LOG_TRIVIAL(info) << "print_job: schedule armed, pa selections " << m_deferred_pa_selections.size();
         return;
     }
 
     // Confirm and select stored PA profiles before the send button is disabled.
-    if (!apply_saved_pa_profiles(obj_))
+    // A print that was scheduled already asked, so only the stored choice is sent.
+    if (m_pa_preflight_done) {
+        for (const PACalibIndexInfo& info : m_deferred_pa_selections)
+            CalibUtils::select_PA_calib_result(info);
+        m_deferred_pa_selections.clear();
+        m_pa_preflight_done = false;
+    } else if (!apply_saved_pa_profiles(obj_)) {
         return;
+    }
+
+    if (m_defer_timelapse_cleanup) {
+        m_defer_timelapse_cleanup = false;
+        obj_->command_ipcam_delete_oldest_timelapse(m_timelapse_storage, m_timelapse_total_layer);
+    }
 
     m_is_canceled = false;
     Enable_Send_Button(false);
@@ -4430,8 +4560,7 @@ void SelectMachineDialog::apply_print_type_wording()
 {
     const bool from_queue = m_print_type == PrintFromType::FROM_PRINT_QUEUE;
     SetTitle(from_queue ? _L("Print immediately") : _L("Send print job"));
-    if (m_button_ensure)
-        m_button_ensure->SetLabel(from_queue ? _L("Print") : _L("Send"));
+    refresh_send_button_label();
 }
 
 void  SelectMachineDialog::reset_timeout()
@@ -4746,6 +4875,15 @@ void SelectMachineDialog::on_timer(wxTimerEvent &event)
 void SelectMachineDialog::update_by_obj(MachineObject* obj_)
 {
     if(!obj_) return;
+
+    // The 200 ms refresh re-enables options such as timelapse. While a scheduled
+    // job is confirmed or still asking, keep the form as the user left it and
+    // only refresh the printer status.
+    if (m_schedule_armed || m_schedule_preflight_pending || m_arm_when_preflight_reaches_send) {
+        update_show_status(obj_);
+        update_print_status_msg();
+        return;
+    }
 
     if (obj_->GetExtderSystem()->GetTotalExtderCount() > 1) {
         change_materialitem_tip(false); /*mapping to both ams and ext, is supported while total_extder_count is 2*/
@@ -5418,9 +5556,309 @@ void SelectMachineDialog::Enable_Refresh_Button(bool en)
     m_printer_box->EnableRefreshButton(en);
 }
 
-void SelectMachineDialog::Enable_Send_Button(bool en)
+void SelectMachineDialog::refresh_send_button_label()
 {
-    if (!en) {
+    if (!m_button_ensure)
+        return;
+
+    wxString label;
+    if (m_schedule_armed)
+        label = _L("Cancel");
+    else if (m_check_schedule && m_check_schedule->GetValue())
+        label = _L("Schedule");
+    else if (m_print_type == PrintFromType::FROM_PRINT_QUEUE)
+        label = _L("Print");
+    else
+        label = _L("Send");
+
+    if (m_button_ensure->GetLabel() == label)
+        return;
+    m_button_ensure->SetLabel(label);
+    if (m_panel_prepare)
+        m_panel_prepare->Layout();
+}
+
+bool SelectMachineDialog::schedule_overrides_send_button() const
+{
+    if (m_release_schedule_hold || m_is_in_sending_mode)
+        return false;
+    if (m_schedule_armed)
+        return true;
+    return m_check_schedule && m_check_schedule->GetValue();
+}
+
+bool SelectMachineDialog::resolve_schedule_target(wxDateTime& target) const
+{
+    if (!m_schedule_time)
+        return false;
+
+    wxString text = m_schedule_time->GetValue();
+    text.Trim(true).Trim(false);
+    const int colon = text.Find(':');
+    if (colon <= 0)
+        return false;
+
+    const wxString hour_text = text.Left(colon);
+    const wxString minute_text = text.Mid(colon + 1);
+    if (hour_text.empty() || hour_text.length() > 2 || minute_text.length() != 2)
+        return false;
+
+    long hour = 0;
+    long minute = 0;
+    if (!hour_text.ToLong(&hour) || !minute_text.ToLong(&minute))
+        return false;
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59)
+        return false;
+
+    const wxDateTime now = wxDateTime::Now();
+    target = now;
+    target.ResetTime();
+    target.SetHour((unsigned short) hour);
+    target.SetMinute((unsigned short) minute);
+    target.SetSecond(0);
+    target.SetMillisecond(0);
+    if (!target.IsValid())
+        return false;
+
+    // The minute already in progress counts as "now" and sends on the next tick.
+    // An earlier clock time means the next occurrence, tomorrow.
+    if (now.GetHour() == (int) hour && now.GetMinute() == (int) minute) {
+        target = now;
+        return true;
+    }
+    if (target <= now)
+        target.Add(wxDateSpan::Day());
+    return target.IsValid();
+}
+
+bool SelectMachineDialog::schedule_time_valid() const
+{
+    wxDateTime unused;
+    return resolve_schedule_target(unused);
+}
+
+void SelectMachineDialog::set_default_schedule_time()
+{
+    if (!m_schedule_time)
+        return;
+    wxDateTime next = wxDateTime::Now();
+    next.Add(wxTimeSpan::Minutes(1));
+    m_schedule_time->ChangeValue(wxString::Format("%02d:%02d", next.GetHour(), next.GetMinute()));
+}
+
+void SelectMachineDialog::sync_schedule_controls()
+{
+    const bool checked = m_check_schedule && m_check_schedule->GetValue();
+    const bool locked = m_schedule_armed || m_schedule_preflight_pending;
+
+    // Enable() repaints the bitmap from the current label. During a click the
+    // new mark is applied by CheckBox after this returns, so don't touch it
+    // when the enabled state is already correct.
+    if (m_check_schedule && m_check_schedule->IsEnabled() != !locked)
+        m_check_schedule->Enable(!locked);
+    if (m_label_schedule && m_label_schedule->IsEnabled() != !locked)
+        m_label_schedule->Enable(!locked);
+    if (m_schedule_time) {
+        m_schedule_time->Show(!m_schedule_armed);
+        m_schedule_time->Enable(checked && !locked);
+    }
+    if (m_schedule_countdown) {
+        m_schedule_countdown->Show(m_schedule_armed);
+        if (m_schedule_armed && m_panel_prepare) {
+            m_schedule_countdown->SetBackgroundColour(m_panel_prepare->GetBackgroundColour());
+            m_schedule_countdown->SetForegroundColour(wxColour(0, 174, 66));
+        }
+    }
+
+    refresh_send_button_label();
+    if (m_schedule_armed)
+        apply_send_button_enabled_look(true);
+    else
+        Enable_Send_Button(m_send_allowed);
+    if (m_panel_prepare)
+        m_panel_prepare->Layout();
+}
+
+void SelectMachineDialog::update_schedule_countdown()
+{
+    if (!m_schedule_countdown)
+        return;
+
+    wxTimeSpan left = m_schedule_target - wxDateTime::Now();
+    if (left.GetSeconds().GetValue() < 0)
+        left = wxTimeSpan::Seconds(0);
+
+    long long total = left.GetSeconds().GetValue();
+    if (total < 0)
+        total = 0;
+    if (total > 99ll * 3600ll)
+        total = 99ll * 3600ll;
+
+    const int hours = (int) (total / 3600);
+    const int minutes = (int) ((total % 3600) / 60);
+    const int seconds = (int) (total % 60);
+    // Seconds already change every tick, so the colon stays put.
+    m_schedule_countdown->SetLabel(wxString::Format("%02d:%02d:%02d", hours, minutes, seconds));
+}
+
+bool SelectMachineDialog::arm_schedule()
+{
+    if (!resolve_schedule_target(m_schedule_target))
+        return false;
+
+    m_schedule_armed = true;
+    m_schedule_preflight_pending = false;
+    m_arm_when_preflight_reaches_send = false;
+    if (!m_schedule_timer) {
+        m_schedule_timer = new wxTimer(this);
+        Bind(wxEVT_TIMER, &SelectMachineDialog::on_schedule_timer, this, m_schedule_timer->GetId());
+    }
+
+    update_schedule_countdown();
+    EnableEditing(false);
+    sync_schedule_controls();
+    m_schedule_timer->Start(1000);
+    return true;
+}
+
+void SelectMachineDialog::disarm_schedule_ui()
+{
+    if (m_schedule_timer && m_schedule_timer->IsRunning())
+        m_schedule_timer->Stop();
+    m_schedule_armed = false;
+    if (m_schedule_countdown)
+        m_schedule_countdown->Hide();
+    if (m_schedule_time)
+        m_schedule_time->Show();
+    refresh_send_button_label();
+    if (m_panel_prepare)
+        m_panel_prepare->Layout();
+}
+
+void SelectMachineDialog::clear_schedule_wait()
+{
+    if (m_schedule_timer && m_schedule_timer->IsRunning())
+        m_schedule_timer->Stop();
+    if (m_schedule_preflight_pending && m_timelapse_check_timer && m_timelapse_check_timer->IsRunning())
+        m_timelapse_check_timer->Stop();
+
+    m_schedule_armed = false;
+    m_arm_when_preflight_reaches_send = false;
+    m_schedule_preflight_pending = false;
+    m_release_schedule_hold = false;
+    m_pa_preflight_done = false;
+    m_deferred_pa_selections.clear();
+    m_defer_timelapse_cleanup = false;
+
+    if (m_schedule_countdown)
+        m_schedule_countdown->Hide();
+    if (m_schedule_time)
+        m_schedule_time->Show();
+    if (!m_is_in_sending_mode)
+        EnableEditing(true);
+    sync_schedule_controls();
+}
+
+void SelectMachineDialog::reset_schedule_state()
+{
+    if (m_check_schedule)
+        m_check_schedule->SetValue(false);
+    clear_schedule_wait();
+}
+
+void SelectMachineDialog::on_schedule_timer(wxTimerEvent&)
+{
+    if (!IsShown() || !m_schedule_armed) {
+        if (m_schedule_timer)
+            m_schedule_timer->Stop();
+        return;
+    }
+
+    if (wxDateTime::Now() >= m_schedule_target) {
+        fire_scheduled_print();
+        return;
+    }
+
+    update_schedule_countdown();
+}
+
+void SelectMachineDialog::fire_scheduled_print()
+{
+    BOOST_LOG_TRIVIAL(info) << "print_job: schedule elapsed, sending";
+    disarm_schedule_ui();
+    m_release_schedule_hold = true;
+    on_send_print();
+    m_release_schedule_hold = false;
+
+    if (!m_is_in_sending_mode) {
+        // Nothing was uploaded. Drop the stored confirms so the next attempt asks again.
+        m_pa_preflight_done = false;
+        m_deferred_pa_selections.clear();
+        m_defer_timelapse_cleanup = false;
+        EnableEditing(true);
+        sync_schedule_controls();
+        return;
+    }
+
+    // The prepare page is hidden while sending. Leave the clock usable for when it returns.
+    if (m_check_schedule)
+        m_check_schedule->Enable(true);
+    if (m_label_schedule)
+        m_label_schedule->Enable(true);
+    if (m_schedule_time)
+        m_schedule_time->Enable(m_check_schedule && m_check_schedule->GetValue());
+}
+
+void SelectMachineDialog::on_ensure_btn(wxCommandEvent& event)
+{
+    if (m_schedule_armed) {
+        clear_schedule_wait();
+        return;
+    }
+
+    if (m_check_schedule && m_check_schedule->GetValue()) {
+        if (m_schedule_preflight_pending)
+            return;
+
+        wxDateTime target;
+        if (!resolve_schedule_target(target))
+            return;
+
+        m_arm_when_preflight_reaches_send = true;
+        m_schedule_preflight_pending = true;
+        // Hold the form while the same confirms Send would show are on screen,
+        // including the asynchronous timelapse storage check.
+        EnableEditing(false);
+        if (m_check_schedule)
+            m_check_schedule->Disable();
+        if (m_label_schedule)
+            m_label_schedule->Disable();
+        if (m_schedule_time)
+            m_schedule_time->Disable();
+
+        on_ok_btn(event);
+
+        // Timelapse storage check returns before the user answers. Anything else
+        // that did not arm the countdown is a cancel or a failed confirm.
+        const bool timelapse_waiting = m_timelapse_check_timer && m_timelapse_check_timer->IsRunning();
+        if (!m_schedule_armed && !timelapse_waiting) {
+            m_arm_when_preflight_reaches_send = false;
+            m_schedule_preflight_pending = false;
+            if (!m_is_in_sending_mode)
+                EnableEditing(true);
+            sync_schedule_controls();
+        }
+        return;
+    }
+
+    on_ok_btn(event);
+}
+
+void SelectMachineDialog::apply_send_button_enabled_look(bool enabled)
+{
+    if (!m_button_ensure)
+        return;
+    if (!enabled) {
         if (m_button_ensure->IsEnabled()) {
             m_button_ensure->Disable();
             m_button_ensure->SetBackgroundColor(wxColour(200, 200, 200));
@@ -5433,6 +5871,20 @@ void SelectMachineDialog::Enable_Send_Button(bool en)
             m_button_ensure->SetBorderColor(m_btn_bg_enable);
         }
     }
+}
+
+void SelectMachineDialog::Enable_Send_Button(bool en)
+{
+    m_send_allowed = en;
+    // Schedule stays clickable while the printer is busy. Invalid clock text and
+    // the real send (m_release_schedule_hold) still follow the normal gray state.
+    if (schedule_overrides_send_button()) {
+        const bool enable = m_schedule_armed || schedule_time_valid();
+        apply_send_button_enabled_look(enable);
+        refresh_send_button_label();
+        return;
+    }
+    apply_send_button_enabled_look(en);
 }
 
 bool SelectMachineDialog::is_add_to_queue_click_masked() const
@@ -5487,6 +5939,14 @@ void SelectMachineDialog::on_dpi_changed(const wxRect &suggested_rect)
     }
     m_button_ensure->SetMinSize(SELECT_MACHINE_DIALOG_BUTTON_SIZE2);
     m_button_ensure->SetCornerRadius(FromDIP(4));
+    if (m_check_schedule)
+        m_check_schedule->Rescale();
+    if (m_schedule_time)
+        m_schedule_time->SetMinSize(wxSize(FromDIP(64), FromDIP(24)));
+    if (m_schedule_countdown) {
+        m_schedule_countdown->SetFont(wxFont(wxFontInfo(FromDIP(14)).Family(wxFONTFAMILY_TELETYPE)));
+        m_schedule_countdown->SetMinSize(wxSize(FromDIP(88), FromDIP(24)));
+    }
     m_status_bar->msw_rescale();
 
     for (auto material1 : m_materialList) {
@@ -6649,11 +7109,25 @@ void SelectMachineDialog::sys_color_changed()
         m_rename_button->SetBitmap(rename_editable->bmp());
     }
     m_rename_button->Refresh();
+
+    if (m_panel_prepare) {
+        const wxColour background = m_panel_prepare->GetBackgroundColour();
+        if (m_check_schedule)
+            m_check_schedule->SetBackgroundColour(background);
+        if (m_label_schedule)
+            m_label_schedule->SetBackgroundColour(background);
+        if (m_schedule_countdown) {
+            m_schedule_countdown->SetBackgroundColour(background);
+            m_schedule_countdown->SetForegroundColour(wxColour(0, 174, 66));
+        }
+    }
 }
 
 bool SelectMachineDialog::Show(bool show)
 {
     if (show) {
+        reset_schedule_state();
+        set_default_schedule_time();
         EnableEditing(true);
         m_options_other->Show();
         m_refresh_timer->Start(LIST_REFRESH_INTERVAL);
@@ -6672,6 +7146,7 @@ bool SelectMachineDialog::Show(bool show)
             }
         };
     } else {
+        reset_schedule_state();
         m_refresh_timer->Stop();
         return DPIDialog::Show(false);
     }
@@ -6708,6 +7183,13 @@ bool SelectMachineDialog::Show(bool show)
 
 SelectMachineDialog::~SelectMachineDialog()
 {
+    if (m_schedule_timer) {
+        m_schedule_timer->Stop();
+        delete m_schedule_timer;
+        m_schedule_timer = nullptr;
+    }
+    if (m_timelapse_check_timer)
+        m_timelapse_check_timer->Stop();
     delete m_refresh_timer;
 }
 

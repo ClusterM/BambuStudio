@@ -26,6 +26,7 @@
 
 #include <unordered_map>
 #include <memory>
+#include <vector>
 
 #include "GUI_ObjectLayers.hpp"
 #include "boost/bimap/bimap.hpp"
@@ -111,7 +112,7 @@ WX_DECLARE_HASH_MAP(int, Material *, wxIntegerHash, wxIntegerEqual, MaterialHash
 #define SELECT_MACHINE_DIALOG_BUTTON_SIZE wxSize(FromDIP(57), FromDIP(32))
 #define SELECT_MACHINE_DIALOG_BUTTON_SIZE2 wxSize(FromDIP(80), FromDIP(32))
 #define SELECT_MACHINE_DIALOG_SIMBOOK_SIZE wxSize(FromDIP(370), FromDIP(64))
-#define SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2 wxSize(FromDIP(645), FromDIP(32))
+#define SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2 wxSize(FromDIP(645), FromDIP(40))
 #define LIST_REFRESH_INTERVAL 200
 static int get_brightness_value(wxImage image) {
 
@@ -395,6 +396,29 @@ protected:
     wxBoxSizer*                         m_change_filament_times_sizer{ nullptr };
     wxBoxSizer*                         m_warn_when_drying_sizer{ nullptr };
     Button*                             m_button_ensure{ nullptr };
+    CheckBox*                           m_check_schedule{ nullptr };
+    Label*                              m_label_schedule{ nullptr };
+    wxTextCtrl*                         m_schedule_time{ nullptr };
+    Label*                              m_schedule_countdown{ nullptr };
+    wxTimer*                            m_schedule_timer{ nullptr };
+    wxDateTime                          m_schedule_target;
+    bool                                m_schedule_armed{ false };
+    // Schedule click is running the same confirms as Send. Reaching on_send_print
+    // arms the timer instead of uploading.
+    bool                                m_arm_when_preflight_reaches_send{ false };
+    // Timelapse storage check is still in flight for a Schedule click.
+    bool                                m_schedule_preflight_pending{ false };
+    // True while the scheduled on_send_print is running, so status updates do not
+    // force the Schedule/Cancel button back on.
+    bool                                m_release_schedule_hold{ false };
+    // PA choices the user already accepted. Applied once, when the wait ends.
+    bool                                m_pa_preflight_done{ false };
+    std::vector<PACalibIndexInfo>       m_deferred_pa_selections;
+    // User confirmed overwriting the oldest timelapse files. The command is sent
+    // with the print, not when the dialog was accepted.
+    bool                                m_defer_timelapse_cleanup{ false };
+    // Last enablement requested for a normal Send, restored when Schedule is off.
+    bool                                m_send_allowed{ false };
     Button*                             m_button_add_to_queue{ nullptr };
     bool                                m_add_to_queue{ false };
     wxLongLong                          m_queue_btn_clickable_after{ 0 };
@@ -567,13 +591,15 @@ public:
     void on_cancel(wxCloseEvent& event);
     void show_errors(wxString& info);
     void on_ok_btn(wxCommandEvent& event);
+    void on_ensure_btn(wxCommandEvent& event);
     void on_add_to_queue_btn(wxCommandEvent& event);
     void on_reselect_dialog_btn_clicked(wxMouseEvent&);
     void Enable_Auto_Refill(bool enable);
     void on_send_print();
     // When Flow Dynamics Calibration is Off, select a stored PA profile for each
     // mapped non-Bambu slot. Returns false when sending must stop.
-    bool apply_saved_pa_profiles(MachineObject* obj);
+    // If deferred is set, the choices are stored there instead of being sent now.
+    bool apply_saved_pa_profiles(MachineObject* obj, std::vector<PACalibIndexInfo>* deferred = nullptr);
     void clear_ip_address_config(wxCommandEvent& e);
     void on_refresh(wxCommandEvent& event);
     void on_set_finish_mapping(wxCommandEvent& evt);
@@ -646,6 +672,20 @@ public:
 private:
     void EnableEditing(bool enable);
     void apply_print_type_wording();
+    void refresh_send_button_label();
+    void apply_send_button_enabled_look(bool enabled);
+    bool schedule_overrides_send_button() const;
+    bool schedule_time_valid() const;
+    bool resolve_schedule_target(wxDateTime& target) const;
+    void set_default_schedule_time();
+    void sync_schedule_controls();
+    bool arm_schedule();
+    void disarm_schedule_ui();
+    void clear_schedule_wait();
+    void reset_schedule_state();
+    void update_schedule_countdown();
+    void on_schedule_timer(wxTimerEvent& event);
+    void fire_scheduled_print();
 
     // printing
     bool is_at_suggested_pos(MachineObject* obj_, int fila_logic_id) const;
