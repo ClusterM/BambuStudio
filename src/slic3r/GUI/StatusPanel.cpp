@@ -5040,17 +5040,10 @@ void StatusPanel::update_extruder_status(MachineObject *obj)
 
 void StatusPanel::update_calib_history(MachineObject *obj)
 {
-    if (!obj)
+    if (!obj || !obj->GetCalib())
         return;
 
-    if (obj->GetCalib()->IsVersionExpired() && obj->is_security_control_ready()) {
-        if (obj->GetCalib()->PrepareFetchQueue()) {
-            obj->GetCalib()->SyncCalibVersion();
-            BOOST_LOG_TRIVIAL(info) << "calibration: rebuild history fetch queue for device " << KV(log_key::dev_name, obj->get_dev_name());
-        }
-    }
-
-    obj->GetCalib()->SendNextFetch();
+    obj->GetCalib()->TickPAHistoryFetch();
 }
 
 static nlohmann::json build_ams_tray_batch_create(DevAmsTray* tray, const std::string& ams_id, MachineObject* obj);
