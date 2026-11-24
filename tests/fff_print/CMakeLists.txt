@@ -47,6 +47,22 @@ endif()
 set_property(TARGET support_material_on_wipe_tower_tests PROPERTY FOLDER "tests")
 add_test(support_material_on_wipe_tower_tests support_material_on_wipe_tower_tests ${CATCH_EXTRA_ARGS})
 
+add_executable(prime_tower_separate_materials_tests
+	fff_print_tests.cpp
+	test_data.cpp
+	test_data.hpp
+	test_prime_tower_separate_materials.cpp
+	)
+target_link_libraries(prime_tower_separate_materials_tests test_common libslic3r
+	libcurl
+	OpenSSL::SSL OpenSSL::Crypto
+)
+if (MSVC)
+	target_link_options(prime_tower_separate_materials_tests PRIVATE /FORCE:UNRESOLVED)
+endif()
+set_property(TARGET prime_tower_separate_materials_tests PROPERTY FOLDER "tests")
+add_test(prime_tower_separate_materials_tests prime_tower_separate_materials_tests ${CATCH_EXTRA_ARGS})
+
 add_executable(periodic_modifier_tests
 	fff_print_tests.cpp
 	test_data.cpp

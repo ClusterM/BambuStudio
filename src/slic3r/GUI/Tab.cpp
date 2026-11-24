@@ -2312,6 +2312,18 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
             new_conf.set_key_value("wipe_tower_no_sparse_layers", new ConfigOptionBool(false));
             m_config_manipulation.apply(m_config, &new_conf);
         }
+        // Smooth timelapse prints the tower wall with whatever is loaded when the layer starts, so the
+        // tower sections can no longer be kept to one material each.
+        if (boost::any_cast<int>(value) == (int) TimelapseType::tlSmooth && m_config->opt_bool("prime_tower_separate_materials")) {
+            MessageDialog dlg(wxGetApp().plater(),
+                              _L("Smooth timelapse is not compatible with \"Separate materials\" of the prime tower. "
+                                 "\"Separate materials\" has been turned off."),
+                              _L("Warning"), wxICON_WARNING | wxOK);
+            dlg.ShowModal();
+            DynamicPrintConfig new_conf = *m_config;
+            new_conf.set_key_value("prime_tower_separate_materials", new ConfigOptionBool(false));
+            m_config_manipulation.apply(m_config, &new_conf);
+        }
 
         bool wipe_tower_enabled = m_config->option<ConfigOptionBool>("enable_prime_tower")->value;
         if (!wipe_tower_enabled && boost::any_cast<int>(value) == (int)TimelapseType::tlSmooth) {
@@ -2335,6 +2347,21 @@ void Tab::on_value_change(const std::string& opt_key, const boost::any& value)
         if (timelapse_type && timelapse_type->value == TimelapseType::tlSmooth) {
             MessageDialog dlg(wxGetApp().plater(),
                               _L("\"No sparse layers\" is not compatible with smooth timelapse, which needs a prime tower on every layer. "
+                                 "Timelapse has been switched to instant mode."),
+                              _L("Warning"), wxICON_WARNING | wxOK);
+            dlg.ShowModal();
+            DynamicPrintConfig new_conf = *m_config;
+            new_conf.set_key_value("timelapse_type", new ConfigOptionEnum<TimelapseType>(TimelapseType::tlTraditional));
+            m_config_manipulation.apply(m_config, &new_conf);
+            wxGetApp().plater()->update();
+        }
+    }
+
+    if (opt_key == "prime_tower_separate_materials" && boost::any_cast<bool>(value)) {
+        auto timelapse_type = m_config->option<ConfigOptionEnum<TimelapseType>>("timelapse_type");
+        if (timelapse_type && timelapse_type->value == TimelapseType::tlSmooth) {
+            MessageDialog dlg(wxGetApp().plater(),
+                              _L("\"Separate materials\" of the prime tower is not compatible with smooth timelapse. "
                                  "Timelapse has been switched to instant mode."),
                               _L("Warning"), wxICON_WARNING | wxOK);
             dlg.ShowModal();
@@ -3451,6 +3478,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("prime_tower_side_scrape_along_length", "parameter/prime-tower");
         optgroup->append_single_option_line("enable_tower_interface_features", "parameter/prime-tower");
         optgroup->append_single_option_line("wipe_tower_no_sparse_layers", "parameter/prime-tower");
+        optgroup->append_single_option_line("prime_tower_separate_materials", "parameter/prime-tower");
 
         optgroup = page->new_optgroup(L("Flush options"), L"param_flush");
         optgroup->append_single_option_line("flush_into_infill", "reduce-wasting-during-filament-change#wipe-into-infill");

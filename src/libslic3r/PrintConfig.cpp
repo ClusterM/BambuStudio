@@ -6505,6 +6505,16 @@ void PrintConfigDef::init_fff_params()
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("prime_tower_separate_materials", coBool);
+    def->label = L("Separate materials (experimental)");
+    def->tooltip = L("If enabled, every section of the prime tower is built from the bed up with filaments of its own "
+                    "adhesiveness category only, so materials that do not bond to each other (e.g. PETG and PVA) are never "
+                    "stacked on top of each other inside the tower. On tower layers that lack a material, an extra visit of a "
+                    "filament of that category is added, preferring one that is already loaded in a nozzle. "
+                    "This adds tool changes. Not compatible with smooth timelapse and wrapping detection.");
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("slice_closing_radius", coFloat);
     def->label = L("Slice gap closing radius");
     def->category = L("Quality");
