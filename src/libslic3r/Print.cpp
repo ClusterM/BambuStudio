@@ -368,6 +368,7 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             || opt_key == "filament_adhesiveness_category"
             //|| opt_key == "wipe_tower_bridging"
             || opt_key == "wipe_tower_no_sparse_layers"
+            || opt_key == "prime_tower_separate_materials"
             || opt_key == "flush_volumes_matrix"
             || opt_key == "filament_prime_volume"
             || opt_key == "filament_prime_volume_nc"

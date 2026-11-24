@@ -747,6 +747,9 @@ private:
     // tower on every layer regardless. Keeping m_first_layer_idx at the bottom-most planned layer and
     // counting the filament of a layer that is printed anyway both depend on that distinction.
     bool            m_sparse_layers_skipped       = false;
+    // wipe_tower_materials_separated(): a section is only ever filled with filaments of its own category, and the
+    // outer wall only with a category that visits every printed tower layer. ToolOrdering adds the visits this needs.
+    bool            m_separate_materials          = false;
     // BBS: remove useless config
     //bool            m_set_extruder_trimpot      = false;
     bool            m_adhesion                  = true;
@@ -984,6 +987,12 @@ private:
 // tower keeps following the object even though the option is on. Tower planning, G-code emission and
 // the clearance validator all ask this single question, so none of them can compact on its own.
 bool wipe_tower_sparse_layers_skipped(const PrintConfig &config);
+
+// Whether prime_tower_separate_materials is really in effect. Smooth timelapse and wrapping detection
+// print the tower wall with whatever is loaded when the layer starts, which defeats the separation, so
+// the option is ignored there. ToolOrdering (which adds the extra tower visits) and the wipe tower
+// generator (which refuses to fill a section with a foreign material) both ask this single question.
+bool wipe_tower_materials_separated(const PrintConfig &config);
 
 // A planned layer prints no tower at all when its only toolchange keeps the same filament.
 bool wipe_tower_layer_is_sparse(const std::vector<WipeTower::ToolChangeResult> &layer_tool_changes);

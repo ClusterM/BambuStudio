@@ -44,6 +44,12 @@ bool wipe_tower_sparse_layers_skipped(const PrintConfig &config)
            ! config.enable_wrapping_detection.value;
 }
 
+bool wipe_tower_materials_separated(const PrintConfig &config)
+{
+    return config.prime_tower_separate_materials.value && config.timelapse_type.value != TimelapseType::tlSmooth &&
+           ! config.enable_wrapping_detection.value;
+}
+
 bool wipe_tower_layer_is_sparse(const std::vector<WipeTower::ToolChangeResult> &layer_tool_changes)
 {
     return layer_tool_changes.size() == 1 && layer_tool_changes.front().initial_tool == layer_tool_changes.front().new_tool;
@@ -1889,6 +1895,7 @@ WipeTower::WipeTower(const PrintConfig& config, int plate_idx, Vec3d plate_origi
     //m_bridging(float(config.wipe_tower_bridging)),
     m_bridging(10.f),
     m_sparse_layers_skipped(wipe_tower_sparse_layers_skipped(config)),
+    m_separate_materials(wipe_tower_materials_separated(config)),
     m_gcode_flavor(config.gcode_flavor),
     m_travel_speed(config.travel_speed.get_at(get_process_config_idx(config, (unsigned int)initial_tool))),
     m_current_tool(initial_tool),
@@ -4117,6 +4124,12 @@ WipeTower::ToolChangeResult WipeTower::finish_layer_new(bool extrude_perimeter, 
             float block_fill_height = band_fill_depth(block, m_cur_layer_id) - 2 * wall_width;
             if (block_fill_height <= WT_EPSILON)
                 continue;
+            // A foreign band stays empty rather than getting this material stacked into it.
+            if (m_separate_materials && decode_block_category(block.block_key) != get_filament_category(int(m_current_tool))) {
+                BOOST_LOG_TRIVIAL(error) << "WipeTower: band " << block.block_key << " on layer " << m_cur_layer_id
+                                         << " is left empty, no filament of its category visits the tower there";
+                continue;
+            }
             fill_boxes.emplace_back(
                 Vec2f(wall_width, block.start_depth + wall_width),
                 m_wipe_tower_width - 2 * wall_width,
@@ -7408,6 +7421,41 @@ int WipeTower::get_wall_filament_for_all_layer() const
             category_counts[get_filament_category(entry.first)] += entry.second;
     }
 
+    // A wall drawn by a category that misses some printed layer would be continued there by a foreign material.
+    // Keep only the categories that visit every printed layer; a compacted tower does not print the layers
+    // without a tool change.
+    if (m_separate_materials) {
+        std::map<int, int> printed_presence;
+        int                printed_layers = 0;
+        int                tool           = m_current_tool;
+        for (const WipeTowerInfo &layer : m_plan) {
+            std::set<int> categories;
+            if (layer.tool_changes.empty()) {
+                categories.insert(get_filament_category(tool));
+            } else {
+                categories.insert(get_filament_category(int(layer.tool_changes.front().old_tool)));
+                for (const WipeTowerInfo::ToolChange &tool_change : layer.tool_changes)
+                    categories.insert(get_filament_category(int(tool_change.new_tool)));
+                tool = int(layer.tool_changes.back().new_tool);
+            }
+            if (m_sparse_layers_skipped && layer.tool_changes.empty())
+                continue;
+            ++printed_layers;
+            for (int category : categories)
+                ++printed_presence[category];
+        }
+        std::map<int, int> complete_categories;
+        for (const auto &entry : category_counts)
+            if (printed_presence[entry.first] == printed_layers)
+                complete_categories.insert(entry);
+        if (! complete_categories.empty()) {
+            category_counts.swap(complete_categories);
+        } else {
+            BOOST_LOG_TRIVIAL(error) << "WipeTower: no filament category visits every printed tower layer, "
+                                        "the outer wall will change material despite prime_tower_separate_materials";
+        }
+    }
+
     // std::vector<std::pair<int, int>> category_counts_vec;
     int selected_category = -1;
     int selected_count    = 0;
@@ -7483,6 +7531,9 @@ int WipeTower::get_wall_filament_for_layer(const WipeTowerInfo &layer, int layer
     if (candidate_id != -1)
         return candidate_id;
 
+    if (m_separate_materials)
+        BOOST_LOG_TRIVIAL(error) << "WipeTower: no filament of the wall category visits the tower on layer " << layer_id
+                                 << ", the outer wall changes material despite prime_tower_separate_materials";
     int fallback_id = int(layer.tool_changes.front().new_tool);
     for (const WipeTowerInfo::ToolChange &tool_change : layer.tool_changes)
         if (fits_this_layer(int(tool_change.new_tool)))
@@ -7517,7 +7568,7 @@ int WipeTower::block_fill_filament_base(
     if (fill_filament == -1 && ! layer.tool_changes.empty() &&
         get_block_key(int(layer.tool_changes.front().old_tool), layer_id) == block.block_key)
         fill_filament = int(layer.tool_changes.front().old_tool);
-    if (fill_filament == -1 && merged_fill_active()) {
+    if (fill_filament == -1 && (merged_fill_active() || m_separate_materials)) {
         fill_filament = same_category_filler(layer, block.block_key);
         // A layer without tool changes is laid down by whatever is still loaded.
         if (fill_filament == -1 && layer.tool_changes.empty()) {
@@ -7557,7 +7608,7 @@ int WipeTower::get_block_fill_filament(
 
     const float height = block.layer_heights[layer_id];
     if (! filament_can_print_height(fill_filament, height)) {
-        const bool same_category_only = merged_fill_active();
+        const bool same_category_only = merged_fill_active() || m_separate_materials;
         auto       can_take_over      = [&](int filament) {
             return filament_can_print_height(filament, height) &&
                    (!same_category_only || get_filament_category(filament) == decode_block_category(block.block_key));
@@ -7926,6 +7977,12 @@ void WipeTower::generate_new(std::vector<std::vector<WipeTower::ToolChangeResult
                         }
                     if (finish_layer_filament < 0 && wall_idx >= 0)
                         finish_layer_filament = wall_idx;
+                    // ToolOrdering was supposed to bring a filament of this category here.
+                    if (m_separate_materials && finish_layer_filament >= 0)
+                        BOOST_LOG_TRIVIAL(error) << "WipeTower: no filament of category " << decode_block_category(block.block_key)
+                                                 << " visits the tower on layer " << m_cur_layer_id << ", band " << block.block_key
+                                                 << " is filled with filament " << finish_layer_filament
+                                                 << " despite prime_tower_separate_materials";
                 }
                 if (finish_layer_filament < 0)
                     continue;
@@ -7955,7 +8012,7 @@ void WipeTower::generate_new(std::vector<std::vector<WipeTower::ToolChangeResult
                 };
                 if (! can_carry_band(finish_layer_filament)) {
                     // A band stacked on, or under, another material does not bond to it.
-                    const bool same_category_only = merged_fill_active();
+                    const bool same_category_only = merged_fill_active() || m_separate_materials;
                     auto       may_fill           = [&](int filament_id) {
                         return !same_category_only ||
                                get_filament_category(filament_id) == decode_block_category(block.block_key);
@@ -7987,6 +8044,10 @@ void WipeTower::generate_new(std::vector<std::vector<WipeTower::ToolChangeResult
                         // Print the foreign fill dense so the band above still has a surface to bond to.
                         if (fallback >= 0)
                             block_solid = true;
+                        if (m_separate_materials && fallback >= 0)
+                            BOOST_LOG_TRIVIAL(error) << "WipeTower: band " << block.block_key << " on layer " << m_cur_layer_id
+                                                     << " is filled with foreign filament " << fallback
+                                                     << " despite prime_tower_separate_materials";
                     }
                     BOOST_LOG_TRIVIAL(warning) << "WipeTower: filament " << finish_layer_filament
                                                << " does not visit the tower on layer " << m_cur_layer_id

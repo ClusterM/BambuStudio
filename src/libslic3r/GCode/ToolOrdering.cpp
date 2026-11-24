@@ -472,6 +472,13 @@ void ToolOrdering::sort_and_build_data(const Print& print, unsigned int first_ex
 
     this->fill_wipe_tower_partitions(print.config(), object_bottom_z, max_layer_height);
 
+    // By-object printing builds its G-code from per-object orderings, which never see these extra visits.
+    if (! print.is_sequential_print() && print.has_wipe_tower() && wipe_tower_materials_separated(print.config()) &&
+        this->enforce_tower_material_separation(print.config(), wipe_tower_sparse_layers_skipped(print.config()))) {
+        this->collect_extruder_statistics(prime_multi_material);
+        this->refresh_current_change_stats(print.config());
+    }
+
     this->calc_most_used_extruder(print.config());
 }
 
@@ -1210,22 +1217,7 @@ void ToolOrdering::fill_wipe_tower_partitions(const PrintConfig &config, coordf_
     if (m_layer_tools.empty())
         return;
 
-    // Count the minimum number of tool changes per layer.
-    size_t last_extruder = size_t(-1);
-    for (LayerTools &lt : m_layer_tools) {
-        lt.wipe_tower_partitions = lt.extruders.size();
-        if (! lt.extruders.empty()) {
-            if (last_extruder == size_t(-1) || last_extruder == lt.extruders.front())
-                // The first extruder on this layer is equal to the current one, no need to do an initial tool change.
-                -- lt.wipe_tower_partitions;
-            last_extruder = lt.extruders.back();
-        }
-    }
-
-    // Propagate the wipe tower partitions down to support the upper partitions by the lower partitions.
-    for (int i = int(m_layer_tools.size()) - 2; i >= 0; -- i)
-        m_layer_tools[i].wipe_tower_partitions = std::max(m_layer_tools[i + 1].wipe_tower_partitions, m_layer_tools[i].wipe_tower_partitions);
-
+    this->count_wipe_tower_partitions();
 
     int wrapping_layer_nums = config.wrapping_detection_layers;
     for (size_t i = 0; i < wrapping_layer_nums; ++i) {
@@ -1397,6 +1389,233 @@ void ToolOrdering::seed_first_tower_layer(unsigned int filament)
     if (first == m_layer_tools.end() || ! first->extruders.empty())
         return;
     first->extruders.push_back(filament);
+}
+
+void ToolOrdering::count_wipe_tower_partitions()
+{
+    // Count the minimum number of tool changes per layer.
+    size_t last_extruder = size_t(-1);
+    for (LayerTools &lt : m_layer_tools) {
+        lt.wipe_tower_partitions = lt.extruders.size();
+        if (! lt.extruders.empty()) {
+            if (last_extruder == size_t(-1) || last_extruder == lt.extruders.front())
+                // The first extruder on this layer is equal to the current one, no need to do an initial tool change.
+                -- lt.wipe_tower_partitions;
+            last_extruder = lt.extruders.back();
+        }
+    }
+
+    // Propagate the wipe tower partitions down to support the upper partitions by the lower partitions.
+    for (int i = int(m_layer_tools.size()) - 2; i >= 0; -- i)
+        m_layer_tools[i].wipe_tower_partitions = std::max(m_layer_tools[i + 1].wipe_tower_partitions, m_layer_tools[i].wipe_tower_partitions);
+}
+
+// The wipe tower keeps one section per adhesiveness category. A section whose material does not visit the tower
+// on some layer is filled with whatever does, so a material that does not bond to it (PVA on PETG) ends up stacked
+// on top of it and the tower splits along that seam. Make every category visit every tower layer its section spans
+// instead. The extra visit prefers a filament that is still sitting in a nozzle, so that it costs a nozzle change
+// rather than a filament reload, and splits a tool change the layer already has, so that it costs exactly one change.
+bool ToolOrdering::enforce_tower_material_separation(const PrintConfig &config, bool sparse_layers_skipped)
+{
+    const int layer_count = int(m_layer_tools.size());
+    if (layer_count == 0)
+        return false;
+
+    // The tower is planned up to the topmost layer that still carries a tool change, see Print::_make_wipe_tower().
+    int top_layer = -1;
+    for (int i = layer_count - 1; i >= 0 && top_layer < 0; --i)
+        if (m_layer_tools[i].wipe_tower_partitions > 0)
+            top_layer = i;
+    if (top_layer < 0)
+        return false;
+
+    const MultiNozzleUtils::LayeredNozzleGroupResult &nozzles = m_nozzle_group_result;
+    auto category_of = [&config](unsigned int filament) {
+        const std::vector<int> &categories = config.filament_adhesiveness_category.values;
+        return filament < categories.size() ? categories[filament] : 0;
+    };
+    auto has_tool_change = [](int loaded, const std::vector<unsigned int> &extruders) {
+        return ! extruders.empty() && (extruders.size() > 1 || (loaded >= 0 && unsigned(loaded) != extruders.front()));
+    };
+    // With sparse layers skipped the tower only exists on layers with a tool change; the others are not printed.
+    auto is_tower_layer = [&](int layer_id, int loaded) {
+        const LayerTools &lt = m_layer_tools[layer_id];
+        return lt.has_wipe_tower && (! sparse_layers_skipped || has_tool_change(loaded, lt.extruders));
+    };
+
+    // 1. Which sections the natural ordering builds, and how high. A section receives depth from every purge of
+    //    its category and from every ramming out of a nozzle of its category, the same rule
+    //    WipeTower::generate_wipe_tower_blocks() applies, and stands from the bed up to its last such layer.
+    std::map<int, int>                       section_top;
+    std::map<int, int>                       presence;
+    std::map<int, std::vector<unsigned int>> category_filaments;
+    int                                      first_tower_layer = -1;
+    {
+        int loaded = -1;
+        for (int i = 0; i <= top_layer; ++i) {
+            const LayerTools &lt = m_layer_tools[i];
+            if (is_tower_layer(i, loaded)) {
+                if (first_tower_layer < 0)
+                    first_tower_layer = i;
+                std::set<int> visiting;
+                if (loaded >= 0)
+                    visiting.insert(category_of(unsigned(loaded)));
+                for (unsigned int filament : lt.extruders) {
+                    visiting.insert(category_of(filament));
+                    std::vector<unsigned int> &filaments = category_filaments[category_of(filament)];
+                    if (std::find(filaments.begin(), filaments.end(), filament) == filaments.end())
+                        filaments.push_back(filament);
+                }
+                for (int category : visiting)
+                    ++presence[category];
+                int previous = loaded;
+                for (unsigned int filament : lt.extruders) {
+                    if (previous >= 0 && unsigned(previous) != filament) {
+                        section_top[category_of(filament)] = i;
+                        if (! nozzles.are_filaments_same_nozzle(previous, int(filament), i))
+                            section_top[category_of(unsigned(previous))] = i;
+                    }
+                    previous = int(filament);
+                }
+            }
+            if (! lt.extruders.empty())
+                loaded = int(lt.extruders.back());
+        }
+    }
+    if (first_tower_layer < 0 || presence.size() < 2)
+        return false;
+
+    // The outer wall spans the whole tower and is drawn by the most frequent category, the same choice
+    // WipeTower::get_wall_filament_for_all_layer() makes; that one has to reach the top. Internal ribs
+    // stretch every section over the full height.
+    int wall_category = presence.begin()->first;
+    for (const auto &[category, count] : presence)
+        if (count > presence[wall_category])
+            wall_category = category;
+    section_top[wall_category] = top_layer;
+    if (config.prime_tower_enable_framework.value)
+        for (const auto &entry : presence)
+            section_top[entry.first] = top_layer;
+
+    auto can_visit = [&](unsigned int filament, int layer_id) {
+        const std::optional<MultiNozzleUtils::NozzleInfo> nozzle = nozzles.get_nozzle_for_filament(int(filament), layer_id);
+        if (! nozzle)
+            return false;
+        const std::vector<double> &heights = config.extruder_printable_height.values;
+        if (nozzle->extruder_id >= 0 && size_t(nozzle->extruder_id) < heights.size() && heights[nozzle->extruder_id] > EPSILON &&
+            m_layer_tools[layer_id].print_z > heights[nozzle->extruder_id] + EPSILON)
+            return false;
+        return true;
+    };
+
+    // 2. Walk the layers bottom up and add the missing visits. The nozzle state follows the final sequence, so a
+    //    filament added on one layer counts as loaded on the next.
+    MultiNozzleUtils::NozzleStatusRecorder recorder = m_initial_nozzle_status;
+    std::map<unsigned int, int>            last_used;
+    size_t                                 added  = 0;
+    int                                    loaded = -1;
+    for (int i = 0; i <= top_layer; ++i) {
+        LayerTools &lt = m_layer_tools[i];
+        if (i >= first_tower_layer && is_tower_layer(i, loaded)) {
+            for (const auto &[category, top] : section_top) {
+                if (i > top)
+                    continue;
+                auto of_category = [&](unsigned int filament) { return category_of(filament) == category; };
+                if ((loaded >= 0 && of_category(unsigned(loaded))) || std::any_of(lt.extruders.begin(), lt.extruders.end(), of_category))
+                    continue;
+
+                // Prefer a filament still sitting in a nozzle: switching to it is a nozzle change only.
+                int filament = -1;
+                for (const auto &[nozzle_id, nozzle_filament] : recorder.get_nozzle_filament_map()) {
+                    if (nozzle_filament < 0 || ! of_category(unsigned(nozzle_filament)) || ! can_visit(unsigned(nozzle_filament), i))
+                        continue;
+                    const std::optional<MultiNozzleUtils::NozzleInfo> nozzle = nozzles.get_nozzle_for_filament(nozzle_filament, i);
+                    if (! nozzle || nozzle->group_id != nozzle_id)
+                        continue;
+                    if (filament < 0 || last_used[unsigned(nozzle_filament)] > last_used[unsigned(filament)])
+                        filament = nozzle_filament;
+                }
+                // Otherwise the one of this category used most recently, then the first one the print needs later.
+                const std::vector<unsigned int> &candidates = category_filaments[category];
+                if (filament < 0)
+                    for (unsigned int candidate : candidates)
+                        if (last_used.count(candidate) && can_visit(candidate, i) &&
+                            (filament < 0 || last_used[candidate] > last_used[unsigned(filament)]))
+                            filament = int(candidate);
+                if (filament < 0)
+                    for (unsigned int candidate : candidates)
+                        if (can_visit(candidate, i)) {
+                            filament = int(candidate);
+                            break;
+                        }
+                if (filament < 0) {
+                    BOOST_LOG_TRIVIAL(warning) << "ToolOrdering: no filament of adhesiveness category " << category
+                                               << " can visit the prime tower at z=" << lt.print_z
+                                               << ", its tower section gets another material there";
+                    continue;
+                }
+
+                if (lt.extruders.empty() && loaded >= 0)
+                    lt.extruders.push_back(unsigned(loaded));
+                const int n = int(lt.extruders.size());
+                // Inserting before extruders[pos] for 0 < pos < n puts the visit between two mixed filament components.
+                auto splits_mixed_group = [&lt, n](int pos) {
+                    for (const LayerTools::MixedSubLayerGroup &group : lt.mixed_sub_layer_groups) {
+                        int first = n, last = -1;
+                        for (unsigned int component : group.components_0based) {
+                            auto it = std::find(lt.extruders.begin(), lt.extruders.end(), component);
+                            if (it == lt.extruders.end())
+                                continue;
+                            first = std::min(first, int(it - lt.extruders.begin()));
+                            last  = std::max(last, int(it - lt.extruders.begin()));
+                        }
+                        if (first < pos && pos <= last)
+                            return true;
+                    }
+                    return false;
+                };
+                // Splitting an existing tool change costs one extra change and keeps the filament the layer ends with.
+                int position = -1, fallback = -1;
+                for (int pos = 0; pos < n && position < 0; ++pos) {
+                    const bool change_here = pos > 0 || (loaded >= 0 && unsigned(loaded) != lt.extruders.front());
+                    if (! change_here)
+                        continue;
+                    if (! splits_mixed_group(pos))
+                        position = pos;
+                    else if (fallback < 0)
+                        fallback = pos;
+                }
+                if (position < 0)
+                    position = fallback;
+                if (position < 0) {
+                    // A layer without a tool change. A compacted tower does not print it at all, so nothing to fix.
+                    if (sparse_layers_skipped)
+                        continue;
+                    // Appending leaves the visit loaded for the next layer, which then changes back as part of its own
+                    // visit: one change per layer. The top tower layer must not hand a tool change to the layer above,
+                    // which has no tower, so it changes there and back.
+                    position = (i == top_layer && loaded >= 0) ? 0 : n;
+                }
+                lt.extruders.insert(lt.extruders.begin() + position, unsigned(filament));
+                ++added;
+                BOOST_LOG_TRIVIAL(debug) << "ToolOrdering: prime tower visit of filament " << filament << " (category "
+                                         << category << ") added at z=" << lt.print_z;
+            }
+        }
+        for (unsigned int filament : lt.extruders) {
+            if (const std::optional<MultiNozzleUtils::NozzleInfo> nozzle = nozzles.get_nozzle_for_filament(int(filament), i))
+                recorder.set_nozzle_status(nozzle->group_id, int(filament), nozzle->extruder_id);
+            last_used[filament] = i;
+        }
+        if (! lt.extruders.empty())
+            loaded = int(lt.extruders.back());
+    }
+
+    if (added == 0)
+        return false;
+    BOOST_LOG_TRIVIAL(info) << "ToolOrdering: prime tower material separation added " << added << " tool changes";
+    this->count_wipe_tower_partitions();
+    return true;
 }
 
 void ToolOrdering::collect_extruder_statistics(bool prime_multi_material)
@@ -2783,6 +3002,25 @@ void ToolOrdering::calculate_and_store_statistics(const PrintConfig             
             }
 
         }
+    }
+}
+
+void ToolOrdering::refresh_current_change_stats(const PrintConfig &config)
+{
+    std::vector<std::vector<unsigned int>> sequences;
+    sequences.reserve(m_layer_tools.size());
+    for (const LayerTools &lt : m_layer_tools)
+        sequences.emplace_back(lt.extruders);
+    const FilamentChangeStats stats = calc_filament_change_info_by_toolorder(config, m_nozzle_group_result,
+                                                                               GroupReorder::prepare_flush_matrices(config), sequences);
+
+    if (config.nozzle_diameter.values.size() <= 1) {
+        m_stats_by_single_extruder = stats;
+    } else {
+        m_stats_by_multi_extruder_curr = stats;
+        // The current grouping is the best one in this mode, see calculate_and_store_statistics().
+        if (config.filament_map_mode == fmmAutoForFlush)
+            m_stats_by_multi_extruder_best = stats;
     }
 }
 

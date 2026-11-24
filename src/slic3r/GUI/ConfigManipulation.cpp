@@ -1102,6 +1102,7 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig *config, in
         toggle_line("enable_tower_interface_features", have_prime_tower && is_tower_interface_supported);
     }
     toggle_line("wipe_tower_no_sparse_layers", have_prime_tower);
+    toggle_line("prime_tower_separate_materials", have_prime_tower);
 
     bool have_rib_wall = config->opt_bool("prime_tower_rib_wall")&&have_prime_tower;
     for (auto el : {"prime_tower_extra_rib_length", "prime_tower_rib_width", "prime_tower_fillet_wall"})

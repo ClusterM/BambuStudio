@@ -424,6 +424,14 @@ private:
     void				initialize_layers(std::vector<coordf_t> &zs);
     void 				collect_extruders(const PrintObject &object, const std::vector<std::pair<double, unsigned int>> &per_layer_extruder_switches);
     void 				fill_wipe_tower_partitions(const PrintConfig &config, coordf_t object_bottom_z, coordf_t max_layer_height);
+    // Minimum number of tool changes per layer, propagated downwards so that the lower tower layers support the upper ones.
+    void                count_wipe_tower_partitions();
+    // prime_tower_separate_materials: add a tower visit of a filament of every adhesiveness category whose tower
+    // section would otherwise be filled with a foreign material on that layer. See wipe_tower_materials_separated().
+    // Returns whether any visit was added.
+    bool                enforce_tower_material_separation(const PrintConfig &config, bool sparse_layers_skipped);
+    // Recount the filament changes and flushes of the current grouping from the final per-layer sequences.
+    void                refresh_current_change_stats(const PrintConfig &config);
     void                mark_skirt_layers(const PrintConfig &config, coordf_t max_layer_height);
     void 				collect_extruder_statistics(bool prime_multi_material);
     void                reorder_extruders_for_minimum_flush_volume(bool reorder_first_layer);
